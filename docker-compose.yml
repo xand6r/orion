@@ -11,8 +11,6 @@ services:
       APP_CONFIG_PATH: /app/config/app.docker.json
       # Force color for pino-pretty / banner green dot
       FORCE_COLOR: "1"
-    ports:
-      - "8080:8080"
     volumes:
       - orion-data:/data
       # Optional: override scoring without rebuilding

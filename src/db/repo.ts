@@ -226,6 +226,119 @@ INSERT INTO scans (
     return (this.db.prepare("SELECT COUNT(*) AS c FROM scans").get() as { c: number }).c;
   }
 
+  basicStats(): {
+    tokens: number;
+    scans: number;
+    scansLast24h: number;
+    watchesActive: number;
+    notes: number;
+    followups: {
+      pending: number;
+      completed: number;
+      unpriced: number;
+      failed: number;
+    };
+    latestByVerdict: Record<string, number>;
+    avgLatestScore: number | null;
+    withSentiment: number;
+    firstScanAt: string | null;
+    lastScanAt: string | null;
+  } {
+    const count = (sql: string): number =>
+      (this.db.prepare(sql).get() as { c: number }).c;
+
+    const tokens = count("SELECT COUNT(*) AS c FROM tokens");
+    const scans = count("SELECT COUNT(*) AS c FROM scans");
+    const since24h = new Date(Date.now() - 24 * 60 * 60_000).toISOString();
+    const scansLast24h = (
+      this.db
+        .prepare(`SELECT COUNT(*) AS c FROM scans WHERE scanned_at >= ?`)
+        .get(since24h) as { c: number }
+    ).c;
+    const watchesActive = count(
+      `SELECT COUNT(*) AS c FROM watchlist WHERE status = 'active'`,
+    );
+    const notes = count("SELECT COUNT(*) AS c FROM notes");
+
+    const followupRows = this.db
+      .prepare(
+        `SELECT status, COUNT(*) AS c FROM followups GROUP BY status`,
+      )
+      .all() as Array<{ status: string; c: number }>;
+    const followups = {
+      pending: 0,
+      completed: 0,
+      unpriced: 0,
+      failed: 0,
+    };
+    for (const row of followupRows) {
+      if (row.status in followups) {
+        followups[row.status as keyof typeof followups] = row.c;
+      }
+    }
+
+    const verdictRows = this.db
+      .prepare(
+        `
+SELECT s.verdict, COUNT(*) AS c
+FROM scans s
+JOIN (
+  SELECT token_address, MAX(id) AS max_id
+  FROM scans
+  GROUP BY token_address
+) latest ON latest.max_id = s.id
+GROUP BY s.verdict
+`,
+      )
+      .all() as Array<{ verdict: string; c: number }>;
+    const latestByVerdict: Record<string, number> = {};
+    for (const row of verdictRows) {
+      latestByVerdict[row.verdict] = row.c;
+    }
+
+    const avgRow = this.db
+      .prepare(
+        `
+SELECT AVG(s.score_total) AS avg_score
+FROM scans s
+JOIN (
+  SELECT token_address, MAX(id) AS max_id
+  FROM scans
+  GROUP BY token_address
+) latest ON latest.max_id = s.id
+`,
+      )
+      .get() as { avg_score: number | null };
+    const avgLatestScore =
+      avgRow.avg_score === null || !Number.isFinite(avgRow.avg_score)
+        ? null
+        : avgRow.avg_score;
+
+    const withSentiment = count(
+      `SELECT COUNT(*) AS c FROM scans WHERE sentiment_score IS NOT NULL`,
+    );
+
+    const range = this.db
+      .prepare(
+        `SELECT MIN(scanned_at) AS first_at, MAX(scanned_at) AS last_at FROM scans`,
+      )
+      .get() as { first_at: string | null; last_at: string | null };
+
+    return {
+      tokens,
+      scans,
+      scansLast24h,
+      watchesActive,
+      notes,
+      followups,
+      latestByVerdict,
+      avgLatestScore,
+      withSentiment,
+      firstScanAt: range.first_at,
+      lastScanAt: range.last_at,
+    };
+  }
+
   listBaselineMetrics(excludeTokenAddress: string): DerivedMetrics[] {
     const rows = this.db
       .prepare(

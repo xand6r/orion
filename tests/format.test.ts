@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
   escapeHtml,
+  formatBasicStats,
   formatFollowupNotification,
   formatOnchainSentimentReport,
   formatRank,
@@ -62,6 +63,27 @@ const score: ScoreResult = {
 describe("telegram formatting", () => {
   it("escapes HTML", () => {
     expect(escapeHtml("a<b>&c")).toBe("a&lt;b&gt;&amp;c");
+  });
+
+  it("formats basic stats", () => {
+    const text = formatBasicStats({
+      tokens: 3,
+      scans: 10,
+      scansLast24h: 2,
+      watchesActive: 1,
+      notes: 4,
+      followups: { pending: 5, completed: 8, unpriced: 1, failed: 0 },
+      latestByVerdict: { INVESTIGATE: 2, WATCH: 1 },
+      avgLatestScore: 54.2,
+      withSentiment: 6,
+      firstScanAt: "2026-07-01T00:00:00.000Z",
+      lastScanAt: "2026-07-22T12:00:00.000Z",
+    });
+    expect(text).toContain("<b>ORION</b> · stats");
+    expect(text).toContain("tokens 3");
+    expect(text).toContain("INVESTIGATE 2");
+    expect(text).toContain("54.2");
+    expect(text).toContain("pending 5");
   });
 
   it("renders a clearer scan report", () => {

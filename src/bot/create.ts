@@ -19,6 +19,7 @@ import {
   formatTop,
   formatRank,
   formatOnchainSentimentReport,
+  formatBasicStats,
   splitTelegram,
 } from "./format.js";
 
@@ -90,25 +91,43 @@ export function createBot(deps: BotDeps): Bot {
     }
   });
 
+  const helpText = [
+    "<b>ORION</b> online ✅",
+    "",
+    "<b>Research</b>",
+    "/scan &lt;address&gt;",
+    "/watch &lt;address&gt;",
+    "/report &lt;address&gt;",
+    "/sentiment solana|robinhood &lt;address&gt; [5|15|60]",
+    "",
+    "<b>Lists</b>",
+    "/rank · /viable · /top 24h · /eval",
+    "",
+    "<b>Status</b>",
+    "/ping · /stats",
+    "",
+    "<b>Notes</b>",
+    "/note &lt;address&gt; &lt;text&gt;",
+    "",
+    "<b>Help</b>",
+    "/start · /help",
+  ].join("\n");
+
   bot.command("start", async (ctx) => {
-    await ctx.reply(
-      [
-        "<b>ORION</b> online ✅",
-        "",
-        "<b>Research</b>",
-        "/scan &lt;address&gt;",
-        "/watch &lt;address&gt;",
-        "/report &lt;address&gt;",
-        "/sentiment solana|robinhood &lt;address&gt; [5|15|60]",
-        "",
-        "<b>Lists</b>",
-        "/rank · /viable · /top 24h · /eval",
-        "",
-        "<b>Notes</b>",
-        "/note &lt;address&gt; &lt;text&gt;",
-      ].join("\n"),
-      { parse_mode: "HTML" },
-    );
+    await ctx.reply(helpText, { parse_mode: "HTML" });
+  });
+
+  bot.command("help", async (ctx) => {
+    await ctx.reply(helpText, { parse_mode: "HTML" });
+  });
+
+  bot.command("ping", async (ctx) => {
+    await ctx.reply("pong");
+  });
+
+  bot.command("stats", async (ctx) => {
+    log.info("stats_requested");
+    await replyChunks(ctx, formatBasicStats(repo.basicStats()));
   });
 
   bot.command("scan", async (ctx) => {

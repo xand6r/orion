@@ -36,6 +36,7 @@ npm run dev
 
 | Command | What it does |
 | --- | --- |
+| `/start` / `/help` | Command menu |
 | `/scan <ca>` | Market+score report (Solana or Robinhood `0x…`); sentiment adjusts the final score |
 | `/watch <ca>` | Add to watchlist |
 | `/note <ca> <text>` | Store a thesis note |
@@ -45,6 +46,8 @@ npm run dev
 | `/rank` | All scanned tokens ranked by **latest** score |
 | `/viable` | Same ranking, only recommendable (≥ `recommendMinScore`, non-critical) |
 | `/eval` | 24h forward returns by score band |
+| `/ping` | Liveness check → `pong` |
+| `/stats` | Catalog / scan / follow-up totals |
 
 Telegram is transport only. Orion responds to explicit commands in allowlisted chats; it does not passively inspect channel messages or use Telegram activity as market data.
 

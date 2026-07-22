@@ -56,6 +56,48 @@ describe("repository", () => {
     db.close();
   });
 
+  it("returns basic catalog stats", () => {
+    const { db, repo } = tempDb();
+    repo.upsertToken({ address: USDC, symbol: "USDC" });
+    repo.addWatch(USDC);
+    repo.addNote(USDC, "note");
+    const metrics = deriveMetrics({
+      pair: {
+        chainId: "solana",
+        dexId: "raydium",
+        pairAddress: "p",
+        url: "https://dexscreener.com/solana/p",
+        baseToken: { address: USDC, name: "USD Coin", symbol: "USDC" },
+        quoteToken: { address: "s", name: "SOL", symbol: "SOL" },
+        priceUsd: "1",
+        liquidity: { usd: 100_000 },
+        marketCap: 200_000,
+      },
+      now: new Date(),
+      mentions: emptyMentions(),
+    });
+    const scored = scoreOpportunity({
+      metrics,
+      config,
+      comparableMetrics: [],
+      hasPrimaryPair: true,
+    });
+    repo.insertScan({
+      tokenAddress: USDC,
+      source: "manual_scan",
+      metrics,
+      score: scored,
+    });
+    const stats = repo.basicStats();
+    expect(stats.tokens).toBe(1);
+    expect(stats.scans).toBe(1);
+    expect(stats.watchesActive).toBe(1);
+    expect(stats.notes).toBe(1);
+    expect(stats.avgLatestScore).toBe(scored.total);
+    expect(stats.latestByVerdict[scored.verdict]).toBe(1);
+    db.close();
+  });
+
   it("ranks tokens by latest score and filters viable", () => {
     const { db, repo } = tempDb();
     const other = "So11111111111111111111111111111111111111112";

@@ -448,6 +448,54 @@ export function formatError(message: string): string {
   return `<b>ORION</b>  ·  ⛔ error\n${escapeHtml(message)}`;
 }
 
+export function formatBasicStats(stats: {
+  tokens: number;
+  scans: number;
+  scansLast24h: number;
+  watchesActive: number;
+  notes: number;
+  followups: {
+    pending: number;
+    completed: number;
+    unpriced: number;
+    failed: number;
+  };
+  latestByVerdict: Record<string, number>;
+  avgLatestScore: number | null;
+  withSentiment: number;
+  firstScanAt: string | null;
+  lastScanAt: string | null;
+}): string {
+  const verdictOrder = ["HIGH ATTENTION", "INVESTIGATE", "WATCH", "IGNORE"];
+  const verdictKeys = [
+    ...verdictOrder.filter((v) => stats.latestByVerdict[v] !== undefined),
+    ...Object.keys(stats.latestByVerdict).filter((v) => !verdictOrder.includes(v)),
+  ];
+  const verdictLine =
+    verdictKeys.length === 0
+      ? "none yet"
+      : verdictKeys.map((v) => `${v} ${stats.latestByVerdict[v] ?? 0}`).join(" · ");
+
+  const avg =
+    stats.avgLatestScore === null ? "n/a" : stats.avgLatestScore.toFixed(1);
+  const followupTotal =
+    stats.followups.pending +
+    stats.followups.completed +
+    stats.followups.unpriced +
+    stats.followups.failed;
+
+  return [
+    "<b>ORION</b> · stats",
+    "",
+    `<b>Catalog</b>  tokens ${stats.tokens} · watches ${stats.watchesActive} · notes ${stats.notes}`,
+    `<b>Scans</b>  total ${stats.scans} · last 24h ${stats.scansLast24h} · with sentiment ${stats.withSentiment}`,
+    `<b>Latest verdicts</b>  ${escapeHtml(verdictLine)}`,
+    `<b>Avg latest score</b>  ${avg}`,
+    `<b>Follow-ups</b>  ${followupTotal}  (pending ${stats.followups.pending} · done ${stats.followups.completed} · unpriced ${stats.followups.unpriced} · failed ${stats.followups.failed})`,
+    `<b>Window</b>  first ${stats.firstScanAt ?? "—"} · last ${stats.lastScanAt ?? "—"}`,
+  ].join("\n");
+}
+
 export function formatOnchainSentimentReport(result: OnchainSentimentSuccess): string {
   const { metrics: m, score } = result;
   const growth = m.buyerGrowth === null ? "n/a" : fmtPct(m.buyerGrowth * 100);
