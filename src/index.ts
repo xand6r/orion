@@ -114,8 +114,6 @@ async function main(): Promise<void> {
 
   await bot.start({
     onStart: (info) => {
-      // eslint-disable-next-line no-console
-      console.log(`\n  @${info.username}  ·  ready\n`);
       log.info("bot_online", { username: info.username });
     },
   });
