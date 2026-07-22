@@ -1,7 +1,7 @@
 {
   "databasePath": "/data/orion.sqlite",
   "logLevel": "info",
-  "logPretty": false,
+  "logPretty": true,
   "scoringConfigPath": "./config/scoring.v4.json",
   "dexscreener": {
     "timeoutMs": 8000,

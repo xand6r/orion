@@ -112,9 +112,12 @@ async function main(): Promise<void> {
     onchainChains: onchain.supportedChains(),
   });
 
+  printMogwaiBanner("  starting…");
+
   await bot.start({
     onStart: (info) => {
-      printMogwaiBanner(`  @${info.username}  ·  ready`);
+      // eslint-disable-next-line no-console
+      console.log(`\n  @${info.username}  ·  ready\n`);
       log.info("bot_online", { username: info.username });
     },
   });

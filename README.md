@@ -9,10 +9,10 @@ No trading. No keys. No `BUY`/`SELL` labels.
 ```bash
 cp .env.example .env   # fill TELEGRAM_BOT_TOKEN + ALLOWED_CHAT_IDS (+ optional HELIUS_API_KEY)
 docker compose up -d --build
-docker compose logs -f orion
+docker compose logs -f --no-log-prefix orion
 ```
 
-SQLite persists in the `orion-data` volume (`/data/orion.sqlite` in the container). Config used in Docker is `config/app.docker.json`.
+SQLite persists in the `orion-data` volume. Docker uses `config/app.docker.json` (pretty logs on). Rebuild after config/code changes.
 
 ## Local setup
 

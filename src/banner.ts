@@ -14,14 +14,10 @@ export const MOGWAI_BANNER = `
 `;
 
 export function printMogwaiBanner(extra?: string): void {
+  // Flush-friendly: write once so docker logging drivers don't scramble lines.
+  const parts = ["\n\n\n\n", MOGWAI_BANNER.trimEnd()];
+  if (extra) parts.push(extra);
+  parts.push("\n\n\n\n");
   // eslint-disable-next-line no-console
-  console.log("\n\n\n\n");
-  // eslint-disable-next-line no-console
-  console.log(MOGWAI_BANNER.trimEnd());
-  if (extra) {
-    // eslint-disable-next-line no-console
-    console.log(extra);
-  }
-  // eslint-disable-next-line no-console
-  console.log("\n\n\n\n");
+  console.log(parts.join("\n"));
 }
