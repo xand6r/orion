@@ -1,0 +1,57 @@
+{
+  "version": "scoring.v3",
+  "weights": {
+    "marketQuality": 25,
+    "marketActivity": 25,
+    "attention": 25,
+    "relativeValue": 25
+  },
+  "marketQuality": {
+    "minLiquidityUsd": 5000,
+    "goodLiquidityUsd": 25000,
+    "minLiquidityToMcap": 0.05,
+    "goodLiquidityToMcap": 0.15,
+    "minPairAgeMinutes": 5,
+    "maturePairAgeMinutes": 60
+  },
+  "marketActivity": {
+    "minTxns1h": 20,
+    "goodTxns1h": 100,
+    "minBuySellRatio": 0.8,
+    "goodBuySellRatio": 1.3,
+    "minVolumeToLiquidity": 0.2,
+    "goodVolumeToLiquidity": 1.0,
+    "extremePriceChange1hPct": 80
+  },
+  "momentum": {
+    "minVolumeToMcap1h": 0.05,
+    "goodVolumeToMcap1h": 0.3
+  },
+  "relativeValue": {
+    "provisionalUntilComparableScans": 30,
+    "goodVolumeToMcap1h": 0.3
+  },
+  "penalties": {
+    "lowLiquidity": 15,
+    "extremePriceExpansion": 12,
+    "veryYoungPair": 10,
+    "sellImbalance": 10,
+    "extremeVolumeToLiquidity": 8,
+    "incompleteMarketData": 10
+  },
+  "verdicts": {
+    "ignoreMax": 39,
+    "watchMax": 59,
+    "investigateMax": 79
+  },
+  "autoWatchMinScore": 65,
+  "recommendMinScore": 65,
+  "followupHorizons": ["15m", "1h", "6h", "24h"],
+  "cohorts": [
+    { "id": "<1h", "maxAgeMinutes": 60 },
+    { "id": "1-6h", "maxAgeMinutes": 360 },
+    { "id": "6-24h", "maxAgeMinutes": 1440 },
+    { "id": "1-7d", "maxAgeMinutes": 10080 },
+    { "id": ">7d", "maxAgeMinutes": null }
+  ]
+}

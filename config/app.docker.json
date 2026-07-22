@@ -1,0 +1,28 @@
+{
+  "databasePath": "/data/orion.sqlite",
+  "logLevel": "info",
+  "logPretty": false,
+  "scoringConfigPath": "./config/scoring.v4.json",
+  "dexscreener": {
+    "timeoutMs": 8000,
+    "cacheMs": 15000,
+    "maxRetries": 2
+  },
+  "followup": {
+    "pollMs": 15000,
+    "maxAttempts": 3,
+    "retryBaseMs": 60000
+  },
+  "helius": {
+    "rpcUrl": "https://mainnet.helius-rpc.com"
+  },
+  "robinhood": {
+    "rpcUrl": "https://rpc.mainnet.chain.robinhood.com"
+  },
+  "onchain": {
+    "timeoutMs": 10000,
+    "maxRetries": 2,
+    "maxTransactions": 100,
+    "defaultWindowMinutes": 15
+  }
+}

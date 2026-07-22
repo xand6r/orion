@@ -1,0 +1,15 @@
+node_modules
+npm-debug.log*
+data
+.git
+.cursor
+.env
+*.sqlite
+*.sqlite-*
+agent-transcripts
+coverage
+dist
+.DS_Store
+README.md
+orion-poc-spec.md
+crypto-information-engine.md

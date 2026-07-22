@@ -1,0 +1,22 @@
+services:
+  orion:
+    build: .
+    container_name: orion
+    restart: unless-stopped
+    env_file:
+      - .env
+    environment:
+      APP_CONFIG_PATH: /app/config/app.docker.json
+    volumes:
+      - orion-data:/data
+      # Optional: override scoring without rebuilding
+      # - ./config/scoring.v4.json:/app/config/scoring.v4.json:ro
+    networks:
+      - orion
+
+volumes:
+  orion-data:
+
+networks:
+  orion:
+    driver: bridge
