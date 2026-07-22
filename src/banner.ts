@@ -4,8 +4,8 @@
 const GREEN_DOT = "\x1b[32m●\x1b[0m";
 
 export const MOGWAI_BANNER = `
-      .--.      ORION
-     |o_o |     mogwai online  ${GREEN_DOT}
+      .--.      ORION ${GREEN_DOT} online
+     |o_o |
      |:_/ |
     //   \\ \\
    (|     | )
