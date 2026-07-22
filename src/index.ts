@@ -7,7 +7,7 @@ import { Repository } from "./db/repo.js";
 import { DexscreenerClient } from "./providers/dexscreener.js";
 import { ScanService } from "./services/scan.js";
 import { FollowupWorker } from "./services/followups.js";
-import { createBot } from "./bot/create.js";
+import { createBot, BOT_COMMANDS } from "./bot/create.js";
 import { splitTelegram } from "./bot/format.js";
 import { SolanaHeliusAdapter } from "./onchain/adapters/solana-helius.js";
 import { RobinhoodEvmAdapter } from "./onchain/adapters/robinhood-evm.js";
@@ -105,6 +105,12 @@ async function main(): Promise<void> {
   });
 
   printMogwaiBanner("  starting…");
+
+  await bot.api.setMyCommands([...BOT_COMMANDS]);
+  await bot.api.setMyCommands([...BOT_COMMANDS], {
+    scope: { type: "all_group_chats" },
+  });
+  log.info("bot_commands_registered", { count: BOT_COMMANDS.length });
 
   await bot.start({
     onStart: (info) => {

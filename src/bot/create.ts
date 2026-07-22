@@ -34,6 +34,23 @@ export type BotDeps = {
   onchain: OnchainSentimentService;
 };
 
+/** Registered with Telegram so `/` shows suggestions. */
+export const BOT_COMMANDS = [
+  { command: "start", description: "Command menu" },
+  { command: "help", description: "Command menu" },
+  { command: "ping", description: "Liveness check → pong" },
+  { command: "stats", description: "Catalog / scan / follow-up totals" },
+  { command: "scan", description: "Score a token (Solana or 0x Robinhood)" },
+  { command: "watch", description: "Watchlist + baseline scan" },
+  { command: "report", description: "Latest score, deltas, notes" },
+  { command: "sentiment", description: "On-chain demand report" },
+  { command: "rank", description: "Tokens by latest score" },
+  { command: "viable", description: "Recommendable tokens only" },
+  { command: "top", description: "Top scores in 1h/6h/24h/7d" },
+  { command: "eval", description: "24h returns by score band" },
+  { command: "note", description: "Save a thesis note" },
+] as const;
+
 function chatAllowed(ctx: Context, env: Env): boolean {
   if (env.allowedChatIds.size === 0) return false;
   const chatId = ctx.chat?.id;
