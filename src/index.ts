@@ -13,12 +13,20 @@ import { SolanaHeliusAdapter } from "./onchain/adapters/solana-helius.js";
 import { RobinhoodEvmAdapter } from "./onchain/adapters/robinhood-evm.js";
 import { OnchainSentimentService } from "./onchain/service.js";
 import { errorFields } from "./logger.js";
+import { printMogwaiBanner } from "./banner.js";
+import { startPingServer } from "./http/ping.js";
 
 async function main(): Promise<void> {
   const env = loadEnv();
   const app = loadAppConfig(env.APP_CONFIG_PATH);
   const log = createLogger(app.logLevel, undefined, { pretty: app.logPretty });
   const scoring = loadScoringConfig(app.scoringConfigPath);
+
+  const pingServer = startPingServer({
+    port: app.http.port,
+    host: app.http.host,
+    log,
+  });
 
   const db = openDatabase(app.databasePath);
   const repo = new Repository(db);
@@ -88,6 +96,7 @@ async function main(): Promise<void> {
   const shutdown = async (signal: string) => {
     log.info("shutting_down", { signal });
     followups.stop();
+    await new Promise<void>((resolve) => pingServer.close(() => resolve()));
     await bot.stop();
     db.close();
     process.exit(0);
@@ -104,7 +113,10 @@ async function main(): Promise<void> {
   });
 
   await bot.start({
-    onStart: (info) => log.info("bot_online", { username: info.username }),
+    onStart: (info) => {
+      printMogwaiBanner(`  @${info.username}  ·  ready`);
+      log.info("bot_online", { username: info.username });
+    },
   });
 }
 

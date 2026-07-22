@@ -30,6 +30,12 @@ export const appConfigSchema = z.object({
     maxTransactions: z.number().int().min(10).max(100),
     defaultWindowMinutes: z.number().int().min(5).max(60),
   }),
+  http: z
+    .object({
+      port: z.number().int().min(1).max(65535),
+      host: z.string().min(1).default("0.0.0.0"),
+    })
+    .default({ port: 8080, host: "0.0.0.0" }),
 });
 
 export type AppConfig = z.infer<typeof appConfigSchema>;

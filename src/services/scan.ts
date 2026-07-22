@@ -66,7 +66,7 @@ export class ScanService {
       onchain?: OnchainSentimentService | null;
       sentimentWindowMinutes?: number;
     },
-  ) {}
+  ) { }
 
   async scanToken(input: {
     tokenAddress: string;

@@ -7,6 +7,8 @@ services:
       - .env
     environment:
       APP_CONFIG_PATH: /app/config/app.docker.json
+    ports:
+      - "8080:8080"
     volumes:
       - orion-data:/data
       # Optional: override scoring without rebuilding

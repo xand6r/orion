@@ -24,5 +24,9 @@
     "maxRetries": 2,
     "maxTransactions": 100,
     "defaultWindowMinutes": 15
+  },
+  "http": {
+    "port": 8080,
+    "host": "0.0.0.0"
   }
 }
