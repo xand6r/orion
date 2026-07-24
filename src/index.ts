@@ -12,6 +12,10 @@ import { splitTelegram } from "./bot/format.js";
 import { SolanaHeliusAdapter } from "./onchain/adapters/solana-helius.js";
 import { RobinhoodEvmAdapter } from "./onchain/adapters/robinhood-evm.js";
 import { OnchainSentimentService } from "./onchain/service.js";
+import { MintRiskService } from "./onchain/mintrisk.js";
+import { RugCheckService } from "./onchain/rugcheck.js";
+import { PumpFunService } from "./onchain/pumpfun.js";
+import { BirdeyeService } from "./providers/birdeye.js";
 import { errorFields } from "./logger.js";
 import { printMogwaiBanner } from "./banner.js";
 
@@ -55,6 +59,32 @@ async function main(): Promise<void> {
     });
   }
   const onchain = new OnchainSentimentService(onchainAdapters, log);
+  const mintRisk = new MintRiskService({
+    apiKey: env.HELIUS_API_KEY ?? null,
+    rpcUrl: app.helius.rpcUrl,
+    timeoutMs: app.onchain.timeoutMs,
+    log,
+  });
+  const rugCheck = new RugCheckService({
+    timeoutMs: app.onchain.timeoutMs,
+    log,
+  });
+  const pumpFun = new PumpFunService({
+    apiKey: env.HELIUS_API_KEY ?? null,
+    rpcUrl: app.helius.rpcUrl,
+    timeoutMs: app.onchain.timeoutMs,
+    log,
+  });
+  const birdeye = new BirdeyeService({
+    apiKey: env.BIRDEYE_API_KEY ?? null,
+    timeoutMs: app.onchain.timeoutMs,
+    log,
+  });
+  if (!env.BIRDEYE_API_KEY) {
+    log.warn("birdeye_disabled", {
+      reason: "BIRDEYE_API_KEY is not configured — creator-holding/holder-count checks skipped",
+    });
+  }
   const scans = new ScanService({
     repo,
     dex,
@@ -62,6 +92,10 @@ async function main(): Promise<void> {
     log,
     onchain,
     sentimentWindowMinutes: app.onchain.defaultWindowMinutes,
+    mintRisk,
+    rugCheck,
+    birdeye,
+    pumpFun,
   });
   const bot = createBot({ env, app, log, repo, scans, config: scoring, dex, onchain });
 

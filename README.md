@@ -7,7 +7,7 @@ No trading. No keys. No `BUY`/`SELL` labels.
 ## Docker
 
 ```bash
-cp .env.example .env   # fill TELEGRAM_BOT_TOKEN + ALLOWED_CHAT_IDS (+ optional HELIUS_API_KEY)
+cp .env.example .env   # fill TELEGRAM_BOT_TOKEN + ALLOWED_CHAT_IDS (+ optional HELIUS_API_KEY / BIRDEYE_API_KEY)
 docker compose up -d --build
 docker compose logs -f --no-log-prefix orion
 ```
@@ -26,7 +26,7 @@ npm test
 npm run dev
 ```
 
-**Secrets** live in `.env` (`TELEGRAM_BOT_TOKEN`, `ALLOWED_CHAT_IDS`, optional `HELIUS_API_KEY`).
+**Secrets** live in `.env` (`TELEGRAM_BOT_TOKEN`, `ALLOWED_CHAT_IDS`, optional `HELIUS_API_KEY`, optional `BIRDEYE_API_KEY`).
 
 **App settings** live in `config/app.json` (database path, log level, Dexscreener/Helius/Robinhood/follow-up timeouts, default sentiment window). Scoring weights stay in `config/scoring.v4.json`.
 
@@ -37,11 +37,13 @@ npm run dev
 | Command | What it does |
 | --- | --- |
 | `/start` / `/help` | Command menu |
-| `/scan <ca>` | Market+score report (Solana or Robinhood `0x…`); sentiment adjusts the final score |
-| `/watch <ca>` | Add to watchlist |
-| `/note <ca> <text>` | Store a thesis note |
-| `/report <ca>` | Latest score, delta, follow-ups, notes |
-| `/sentiment solana\|robinhood <ca> [5\|15\|60]` | Full on-chain demand report; defaults to 15 minutes |
+| `/ping` | Liveness check → `pong` |
+| `/stats` | Catalog / scan / follow-up totals |
+| `/scan sol\|rh <ca>` | Market+score report; sentiment adjusts the final score. Pre-graduation Solana mints fall back to a bonding-curve report |
+| `/watch sol\|rh <ca>` | Add to watchlist |
+| `/note sol\|rh <ca> <text>` | Store a thesis note |
+| `/report sol\|rh <ca>` | Latest score, delta, follow-ups, notes |
+| `/sentiment sol\|rh <ca> [5\|15\|60]` | Full on-chain demand report; defaults to 15 minutes |
 | `/top 24h` | Highest scores first-seen in the window (`1h`/`6h`/`24h`/`7d`) |
 | `/rank` | All scanned tokens ranked by **latest** score |
 | `/viable` | Same ranking, only recommendable (≥ `recommendMinScore`, non-critical) |
@@ -69,6 +71,20 @@ config/scoring.v3.json
 
 Thresholds live in `config/scoring.v4.json`. Bump `version` when you change weights so stored scores stay auditable. The market score uses provider-derived quality, activity, momentum, and relative volume; on-chain sentiment then applies a capped adjustment (STRONG +8, CONSTRUCTIVE +4, WEAK −12; provisional/insufficient dampened). Telegram mentions do not contribute. Verdicts are capped: sub-usable liquidity or critical data never scores above `WATCH`, incomplete data never above `INVESTIGATE`.
 
+For Solana tokens with `HELIUS_API_KEY` configured, Orion also reads the mint account directly on-chain and checks the mint and freeze authorities. An active mint authority (deployer can inflate supply) or active freeze authority (deployer can lock wallets out of selling) applies a further penalty and caps the verdict at `WATCH`, the same way critical data does. Both revoked earns a green flag; the check is Solana-only and limited to legacy Token program authorities (no Token-2022 extension decoding). When the check can't run (Robinhood chain, no API key, provider failure) a neutral "not checked" flag is recorded instead.
+
+### Rug-detection providers (Solana)
+
+Two independent, additive checks run alongside the Helius mint/freeze check — each can fail or be unavailable without affecting the others:
+
+- **RugCheck** (`src/onchain/rugcheck.ts`) — free, keyless public API (`api.rugcheck.xyz`). Adds a RugCheck score/risk level, LP-lock status, and top-holder concentration computed *excluding* LP pool accounts (something Orion deliberately doesn't attempt to compute itself, to avoid false positives on every fresh pair). Below `rugcheck.minScore`, an unlocked LP, or top holders above `rugcheck.maxTopHoldersPct` applies a penalty and caps the verdict at `WATCH`. Results are cached 60s per mint.
+- **Birdeye** (`src/providers/birdeye.ts`) — optional `BIRDEYE_API_KEY` (free Standard tier: 30,000 compute units/month, 1 req/sec). Adds creator/dev wallet holding % and raw holder count from an independent data source. Heavy creator holding or too few holders applies a penalty. Because the free tier's quota is tight, Birdeye is only called on the baseline `/scan` or `/watch`, never on scheduled follow-ups, and results are cached 5 minutes per mint. Without the key, checks are skipped entirely (flagged "Birdeye not checked", no penalty).
+- **SolSniffer** was evaluated and intentionally skipped: its free tier caps at 100 API calls/month, which a bot doing an initial scan plus up to 4 follow-ups per token would exhaust almost immediately. RugCheck's public summary endpoint already covers the same core signals (score, risk level, LP lock, holder concentration) for free with no call cap.
+
+### Pump.fun bonding-curve tokens (pre-graduation)
+
+Tokens still on pump.fun's bonding curve have no Raydium/Dexscreener pair yet, so `/scan` and `/watch` fall back to a dedicated path: the bonding-curve account is PDA-derived (`src/onchain/pda.ts`, reimplements Solana's `findProgramAddressSync` with `@noble/curves` rather than pulling in `@solana/web3.js`) and read directly on-chain via `getAccountInfo` (`src/onchain/pumpfun.ts`), requires `HELIUS_API_KEY`. It's scored by a separate, narrower model (`src/scoring/bonding.ts`): bonding progress within a configurable sweet-spot band (`bondingCurve.sweetSpotMinPct`/`Max`, default 40–90%, avoiding both unproven-early and already-priced-in-late curves) plus SOL raised so far relative to a typical graduation raise. This score is always marked `dataQuality: "critical"` (no scan history, no peer cohort) and capped at `bondingCurve.maxVerdict` (default `INVESTIGATE`); the mint/freeze, RugCheck checks above still run on top of it. Once a curve graduates, the token gets a normal Dexscreener pair and reverts to the standard market-scoring path on the next scan.
+
 ## Telegram data policy
 
 - Chat IDs are read in memory only for allowlist authorization.
@@ -79,7 +95,7 @@ Thresholds live in `config/scoring.v4.json`. Bump `version` when you change weig
 
 ## On-chain sentiment
 
-Run `/sentiment solana <token-address> 15`. Orion selects the token's primary Dexscreener pool, asks Helius for finalized transactions involving that pool over the current and previous windows, and classifies fee-payer token balance changes as buys or sells. Simple transfers without an opposing token or SOL flow are excluded.
+Run `/sentiment sol <token-address> 15`. Orion selects the token's primary Dexscreener pool, asks Helius for finalized transactions involving that pool over the current and previous windows, and classifies fee-payer token balance changes as buys or sells. Simple transfers without an opposing token or SOL flow are excluded.
 
 The 100-point score measures buyer breadth (25), buy/sell volume balance (25), net flow (20), buyer acceleration versus the previous window (15), and buyer concentration (15). It reports `INSUFFICIENT` confidence below 5 swaps and `PROVISIONAL` below 20; this is a demand signal, not a valuation or trade recommendation.
 

@@ -2,7 +2,13 @@ import { readFileSync } from "node:fs";
 import { describe, expect, it } from "vitest";
 import { scoringConfigSchema } from "../src/config/scoring.js";
 import { deriveMetrics, emptyMentions } from "../src/metrics/derive.js";
-import { applySentimentAdjustment, scoreOpportunity } from "../src/scoring/engine.js";
+import {
+  applyBirdeyeAdjustment,
+  applyMintRiskAdjustment,
+  applyRugCheckAdjustment,
+  applySentimentAdjustment,
+  scoreOpportunity,
+} from "../src/scoring/engine.js";
 import type { DexPair } from "../src/providers/dexscreener.js";
 
 const config = scoringConfigSchema.parse(
@@ -254,5 +260,216 @@ describe("scoring", () => {
     expect(ranked.provisional).toBe(false);
     expect(ranked.comparableCount).toBe(30);
     expect(ranked.relativeValue).toBeGreaterThan(provisional.relativeValue);
+  });
+
+  it("flags an unchecked mint risk without touching the score", () => {
+    const metrics = deriveMetrics({
+      pair: basePair(),
+      now: new Date(),
+      mentions: emptyMentions(),
+    });
+    const base = scoreOpportunity({
+      metrics,
+      config,
+      comparableMetrics: [],
+      hasPrimaryPair: true,
+    });
+    const result = applyMintRiskAdjustment(base, null, config);
+
+    expect(result.total).toBe(base.total);
+    expect(result.verdict).toBe(base.verdict);
+    expect(result.mintRiskPenalty ?? 0).toBe(0);
+    expect(result.flags.some((f) => f.text === "Mint/freeze authority not checked")).toBe(
+      true,
+    );
+  });
+
+  it("penalizes and caps the verdict when the mint authority is still active", () => {
+    const metrics = deriveMetrics({
+      pair: basePair(),
+      now: new Date(),
+      mentions: { ...emptyMentions(), h1: 50, prevH1: 1 },
+    });
+    const base = scoreOpportunity({
+      metrics,
+      config,
+      comparableMetrics: Array.from({ length: 30 }, () => metrics),
+      hasPrimaryPair: true,
+    });
+    const result = applyMintRiskAdjustment(
+      base,
+      { checked: true, mintAuthorityRevoked: false, freezeAuthorityRevoked: true },
+      config,
+    );
+
+    expect(result.mintRiskPenalty).toBe(config.mintRisk?.mintAuthorityActivePenalty);
+    expect(result.total).toBe(clampTotal(base.total - (config.mintRisk?.mintAuthorityActivePenalty ?? 0)));
+    expect(["IGNORE", "WATCH"]).toContain(result.verdict);
+    expect(
+      result.flags.some((f) => f.text.includes("Mint authority still active")),
+    ).toBe(true);
+  });
+
+  it("rewards a clean mint/freeze check with a green flag and no penalty", () => {
+    const metrics = deriveMetrics({
+      pair: basePair(),
+      now: new Date(),
+      mentions: emptyMentions(),
+    });
+    const base = scoreOpportunity({
+      metrics,
+      config,
+      comparableMetrics: [],
+      hasPrimaryPair: true,
+    });
+    const result = applyMintRiskAdjustment(
+      base,
+      { checked: true, mintAuthorityRevoked: true, freezeAuthorityRevoked: true },
+      config,
+    );
+
+    expect(result.mintRiskPenalty).toBe(0);
+    expect(result.total).toBe(base.total);
+    expect(
+      result.flags.some((f) => f.text === "Mint & freeze authority renounced" && f.kind === "green"),
+    ).toBe(true);
+  });
+
+  it("flags an unchecked RugCheck lookup without touching the score", () => {
+    const metrics = deriveMetrics({
+      pair: basePair(),
+      now: new Date(),
+      mentions: emptyMentions(),
+    });
+    const base = scoreOpportunity({
+      metrics,
+      config,
+      comparableMetrics: [],
+      hasPrimaryPair: true,
+    });
+    const result = applyRugCheckAdjustment(base, null, config);
+
+    expect(result.total).toBe(base.total);
+    expect(result.flags.some((f) => f.text === "RugCheck not checked")).toBe(true);
+  });
+
+  it("penalizes a low RugCheck score, unlocked LP, and holder concentration", () => {
+    const metrics = deriveMetrics({
+      pair: basePair(),
+      now: new Date(),
+      mentions: { ...emptyMentions(), h1: 50, prevH1: 1 },
+    });
+    const base = scoreOpportunity({
+      metrics,
+      config,
+      comparableMetrics: Array.from({ length: 30 }, () => metrics),
+      hasPrimaryPair: true,
+    });
+    const result = applyRugCheckAdjustment(
+      base,
+      { checked: true, score: 35, riskLevel: "Danger", lpLocked: false, topHoldersPct: 61 },
+      config,
+    );
+
+    const expectedPenalty =
+      (config.rugcheck?.lowScorePenalty ?? 0) +
+      (config.rugcheck?.unlockedLpPenalty ?? 0) +
+      (config.rugcheck?.highConcentrationPenalty ?? 0);
+    expect(result.total).toBe(clampTotal(base.total - expectedPenalty));
+    expect(["IGNORE", "WATCH"]).toContain(result.verdict);
+    expect(result.flags.some((f) => f.text.includes("RugCheck score 35"))).toBe(true);
+    expect(result.flags.some((f) => f.text.includes("not locked"))).toBe(true);
+    expect(result.flags.some((f) => f.text.includes("Top holders control 61%"))).toBe(true);
+  });
+
+  it("rewards a clean RugCheck result with a green flag and no penalty", () => {
+    const metrics = deriveMetrics({
+      pair: basePair(),
+      now: new Date(),
+      mentions: emptyMentions(),
+    });
+    const base = scoreOpportunity({
+      metrics,
+      config,
+      comparableMetrics: [],
+      hasPrimaryPair: true,
+    });
+    const result = applyRugCheckAdjustment(
+      base,
+      { checked: true, score: 95, riskLevel: "Good", lpLocked: true, topHoldersPct: 12 },
+      config,
+    );
+
+    expect(result.total).toBe(base.total);
+    expect(result.flags.some((f) => f.text.startsWith("RugCheck clean") && f.kind === "green")).toBe(
+      true,
+    );
+  });
+
+  it("flags an unchecked Birdeye lookup without touching the score", () => {
+    const metrics = deriveMetrics({
+      pair: basePair(),
+      now: new Date(),
+      mentions: emptyMentions(),
+    });
+    const base = scoreOpportunity({
+      metrics,
+      config,
+      comparableMetrics: [],
+      hasPrimaryPair: true,
+    });
+    const result = applyBirdeyeAdjustment(base, null, config);
+
+    expect(result.total).toBe(base.total);
+    expect(result.flags.some((f) => f.text === "Birdeye not checked")).toBe(true);
+  });
+
+  it("penalizes a heavy creator holding and thin holder count", () => {
+    const metrics = deriveMetrics({
+      pair: basePair(),
+      now: new Date(),
+      mentions: { ...emptyMentions(), h1: 50, prevH1: 1 },
+    });
+    const base = scoreOpportunity({
+      metrics,
+      config,
+      comparableMetrics: Array.from({ length: 30 }, () => metrics),
+      hasPrimaryPair: true,
+    });
+    const result = applyBirdeyeAdjustment(
+      base,
+      { checked: true, creatorPercentage: 22, holders: 20 },
+      config,
+    );
+
+    const expectedPenalty =
+      (config.birdeye?.creatorHoldingPenalty ?? 0) + (config.birdeye?.lowHolderPenalty ?? 0);
+    expect(result.total).toBe(clampTotal(base.total - expectedPenalty));
+    expect(result.flags.some((f) => f.text.includes("Creator wallet holds 22"))).toBe(true);
+    expect(result.flags.some((f) => f.text.includes("Only 20 holders"))).toBe(true);
+  });
+
+  it("rewards a healthy creator holding and holder count with a green flag", () => {
+    const metrics = deriveMetrics({
+      pair: basePair(),
+      now: new Date(),
+      mentions: emptyMentions(),
+    });
+    const base = scoreOpportunity({
+      metrics,
+      config,
+      comparableMetrics: [],
+      hasPrimaryPair: true,
+    });
+    const result = applyBirdeyeAdjustment(
+      base,
+      { checked: true, creatorPercentage: 3, holders: 500 },
+      config,
+    );
+
+    expect(result.total).toBe(base.total);
+    expect(
+      result.flags.some((f) => f.text.startsWith("Birdeye: creator holding") && f.kind === "green"),
+    ).toBe(true);
   });
 });

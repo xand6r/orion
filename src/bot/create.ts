@@ -1,6 +1,6 @@
 import { Bot, type Context } from "grammy";
 import { isValidSolanaAddress } from "../address/solana.js";
-import { detectMarketChain, isValidTokenAddress } from "../address/detect.js";
+import type { MarketChain } from "../address/detect.js";
 import { isValidEvmAddress } from "../address/evm.js";
 import type { Env } from "../env.js";
 import type { Logger } from "../logger.js";
@@ -40,15 +40,15 @@ export const BOT_COMMANDS = [
   { command: "help", description: "Command menu" },
   { command: "ping", description: "Liveness check → pong" },
   { command: "stats", description: "Catalog / scan / follow-up totals" },
-  { command: "scan", description: "Score a token (Solana or 0x Robinhood)" },
-  { command: "watch", description: "Watchlist + baseline scan" },
-  { command: "report", description: "Latest score, deltas, notes" },
-  { command: "sentiment", description: "On-chain demand report" },
+  { command: "scan", description: "sol|rh <address> — score a token" },
+  { command: "watch", description: "sol|rh <address> — watchlist + baseline scan" },
+  { command: "report", description: "sol|rh <address> — latest score, deltas, notes" },
+  { command: "sentiment", description: "sol|rh <address> [5|15|60] — on-chain demand report" },
   { command: "rank", description: "Tokens by latest score" },
   { command: "viable", description: "Recommendable tokens only" },
   { command: "top", description: "Top scores in 1h/6h/24h/7d" },
   { command: "eval", description: "24h returns by score band" },
-  { command: "note", description: "Save a thesis note" },
+  { command: "note", description: "sol|rh <address> <text> — save a thesis note" },
 ] as const;
 
 function chatAllowed(ctx: Context, env: Env): boolean {
@@ -62,6 +62,29 @@ function commandName(ctx: Context): string {
   const text = ctx.message?.text ?? ctx.channelPost?.text ?? "";
   const match = text.match(/^\/([a-zA-Z0-9_]+)/);
   return match?.[1]?.toLowerCase() ?? "unknown";
+}
+
+const CHAIN_ALIASES: Record<string, MarketChain> = {
+  sol: "solana",
+  solana: "solana",
+  rh: "robinhood",
+  robinhood: "robinhood",
+};
+
+/** Every command that takes a chain arg accepts the same sol|rh (or full-name) tokens. */
+function parseChainArg(raw: string): MarketChain | null {
+  return CHAIN_ALIASES[raw.trim().toLowerCase()] ?? null;
+}
+
+/** Catches "sol <0x…>" / "rh <base58>" typos before they hit a provider call. */
+function chainAddressMismatch(chain: MarketChain, address: string): string | null {
+  if (chain === "solana" && !isValidSolanaAddress(address)) {
+    return "That doesn't look like a Solana address.";
+  }
+  if (chain === "robinhood" && !isValidEvmAddress(address)) {
+    return "That doesn't look like a Robinhood (0x…) address.";
+  }
+  return null;
 }
 
 async function replyChunks(ctx: Context, text: string): Promise<void> {
@@ -112,10 +135,10 @@ export function createBot(deps: BotDeps): Bot {
     "<b>ORION</b> online ✅",
     "",
     "<b>Research</b>",
-    "/scan &lt;address&gt;",
-    "/watch &lt;address&gt;",
-    "/report &lt;address&gt;",
-    "/sentiment solana|robinhood &lt;address&gt; [5|15|60]",
+    "/scan sol|rh &lt;address&gt;",
+    "/watch sol|rh &lt;address&gt;",
+    "/report sol|rh &lt;address&gt;",
+    "/sentiment sol|rh &lt;address&gt; [5|15|60]",
     "",
     "<b>Lists</b>",
     "/rank · /viable · /top 24h · /eval",
@@ -124,7 +147,7 @@ export function createBot(deps: BotDeps): Bot {
     "/ping · /stats",
     "",
     "<b>Notes</b>",
-    "/note &lt;address&gt; &lt;text&gt;",
+    "/note sol|rh &lt;address&gt; &lt;text&gt;",
     "",
     "<b>Help</b>",
     "/start · /help",
@@ -148,28 +171,38 @@ export function createBot(deps: BotDeps): Bot {
   });
 
   bot.command("scan", async (ctx) => {
-    const arg = (ctx.match ?? "").toString().trim().split(/\s+/)[0] ?? "";
-    if (!arg || !isValidTokenAddress(arg)) {
-      await ctx.reply(formatError("Usage: /scan <solana-or-0x-robinhood-address>"), {
-        parse_mode: "HTML",
-      });
+    const args = (ctx.match ?? "").toString().trim().split(/\s+/).filter(Boolean);
+    const chain = parseChainArg(args[0] ?? "");
+    const arg = args[1] ?? "";
+    if (!chain || !arg) {
+      await ctx.reply(formatError("Usage: /scan sol|rh <address>"), { parse_mode: "HTML" });
+      return;
+    }
+    const mismatch = chainAddressMismatch(chain, arg);
+    if (mismatch) {
+      await ctx.reply(formatError(mismatch), { parse_mode: "HTML" });
       return;
     }
 
-    log.info("scan_requested", { address: arg, source: "manual_scan", chain: detectMarketChain(arg) });
+    log.info("scan_requested", { address: arg, source: "manual_scan", chain });
     repo.upsertToken({ address: arg });
     await runAndReply(ctx, deps, arg, "manual_scan", false);
   });
 
   bot.command("watch", async (ctx) => {
-    const arg = (ctx.match ?? "").toString().trim().split(/\s+/)[0] ?? "";
-    if (!arg || !isValidTokenAddress(arg)) {
-      await ctx.reply(formatError("Usage: /watch <solana-or-0x-robinhood-address>"), {
-        parse_mode: "HTML",
-      });
+    const args = (ctx.match ?? "").toString().trim().split(/\s+/).filter(Boolean);
+    const chain = parseChainArg(args[0] ?? "");
+    const arg = args[1] ?? "";
+    if (!chain || !arg) {
+      await ctx.reply(formatError("Usage: /watch sol|rh <address>"), { parse_mode: "HTML" });
       return;
     }
-    log.info("watch_requested", { address: arg, chain: detectMarketChain(arg) });
+    const mismatch = chainAddressMismatch(chain, arg);
+    if (mismatch) {
+      await ctx.reply(formatError(mismatch), { parse_mode: "HTML" });
+      return;
+    }
+    log.info("watch_requested", { address: arg, chain });
     repo.upsertToken({ address: arg });
     repo.addWatch(arg);
     await ctx.reply(`Watching <code>${arg}</code>. Creating a baseline scan.`, {
@@ -180,29 +213,44 @@ export function createBot(deps: BotDeps): Bot {
 
   bot.command("note", async (ctx) => {
     const raw = (ctx.match ?? "").toString().trim();
-    const sp = raw.indexOf(" ");
-    const address = sp === -1 ? raw : raw.slice(0, sp);
-    const text = sp === -1 ? "" : raw.slice(sp + 1).trim();
-    if (!address || !isValidTokenAddress(address) || !text) {
-      await ctx.reply(formatError("Usage: /note <address> <text>"), { parse_mode: "HTML" });
+    const firstSp = raw.indexOf(" ");
+    const chainToken = firstSp === -1 ? raw : raw.slice(0, firstSp);
+    const rest = firstSp === -1 ? "" : raw.slice(firstSp + 1).trim();
+    const secondSp = rest.indexOf(" ");
+    const address = secondSp === -1 ? rest : rest.slice(0, secondSp);
+    const text = secondSp === -1 ? "" : rest.slice(secondSp + 1).trim();
+
+    const chain = parseChainArg(chainToken);
+    if (!chain || !address || !text) {
+      await ctx.reply(formatError("Usage: /note sol|rh <address> <text>"), { parse_mode: "HTML" });
       return;
     }
-    log.info("note_requested", { address });
+    const mismatch = chainAddressMismatch(chain, address);
+    if (mismatch) {
+      await ctx.reply(formatError(mismatch), { parse_mode: "HTML" });
+      return;
+    }
+    log.info("note_requested", { address, chain });
     repo.upsertToken({ address });
     repo.addNote(address, text);
     await ctx.reply("Note saved.", { parse_mode: "HTML" });
   });
 
   bot.command("report", async (ctx) => {
-    const arg = (ctx.match ?? "").toString().trim().split(/\s+/)[0] ?? "";
-    if (!arg || !isValidTokenAddress(arg)) {
-      await ctx.reply(formatError("Usage: /report <solana-or-0x-robinhood-address>"), {
-        parse_mode: "HTML",
-      });
+    const args = (ctx.match ?? "").toString().trim().split(/\s+/).filter(Boolean);
+    const chain = parseChainArg(args[0] ?? "");
+    const arg = args[1] ?? "";
+    if (!chain || !arg) {
+      await ctx.reply(formatError("Usage: /report sol|rh <address>"), { parse_mode: "HTML" });
+      return;
+    }
+    const mismatch = chainAddressMismatch(chain, arg);
+    if (mismatch) {
+      await ctx.reply(formatError(mismatch), { parse_mode: "HTML" });
       return;
     }
 
-    log.info("report_requested", { address: arg });
+    log.info("report_requested", { address: arg, chain });
     const token = repo.getToken(arg);
     const latest = repo.latestScan(arg);
     if (!token || !latest) {
@@ -277,11 +325,16 @@ export function createBot(deps: BotDeps): Bot {
 
   bot.command("sentiment", async (ctx) => {
     const args = (ctx.match ?? "").toString().trim().split(/\s+/).filter(Boolean);
-    const chain = args[0] ?? "";
+    const chain = parseChainArg(args[0] ?? "");
     const address = args[1] ?? "";
     const requestedWindow = args[2] ? Number(args[2]) : deps.app.onchain.defaultWindowMinutes;
     if (!chain || !address || ![5, 15, 60].includes(requestedWindow)) {
-      await replyChunks(ctx, formatError("Usage: /sentiment <chain> <address> [5|15|60]"));
+      await replyChunks(ctx, formatError("Usage: /sentiment sol|rh <address> [5|15|60]"));
+      return;
+    }
+    const mismatch = chainAddressMismatch(chain, address);
+    if (mismatch) {
+      await replyChunks(ctx, formatError(mismatch));
       return;
     }
 
@@ -289,47 +342,25 @@ export function createBot(deps: BotDeps): Bot {
 
     let priceUsd: number | null = null;
     let marketAddress: string | null = null;
-    const normalizedChain = chain.toLowerCase() === "sol" ? "solana" : chain.toLowerCase() === "rh" ? "robinhood" : chain.toLowerCase();
 
-    if (normalizedChain === "solana") {
-      if (!isValidSolanaAddress(address)) {
-        await replyChunks(ctx, formatError("Invalid Solana token address"));
-        return;
-      }
-    } else if (normalizedChain === "robinhood") {
-      if (!isValidEvmAddress(address)) {
-        await replyChunks(ctx, formatError("Invalid Robinhood (EVM) token address"));
-        return;
-      }
+    try {
+      const pairs = await deps.dex.getTokenPairs(address, chain);
+      const selected = selectPrimaryPair(address, pairs, chain);
+      marketAddress = selected?.pair.pairAddress ?? null;
+      const parsedPrice = Number(selected?.pair.priceUsd);
+      priceUsd = Number.isFinite(parsedPrice) && parsedPrice >= 0 ? parsedPrice : null;
+    } catch (error) {
+      log.warn("onchain_price_lookup_failed", { ...errorFields(error), chain, address });
     }
 
-    if (normalizedChain === "solana" || normalizedChain === "robinhood") {
-      try {
-        const pairs = await deps.dex.getTokenPairs(address, normalizedChain);
-        const selected = selectPrimaryPair(address, pairs, normalizedChain);
-        marketAddress = selected?.pair.pairAddress ?? null;
-        const parsedPrice = Number(selected?.pair.priceUsd);
-        priceUsd = Number.isFinite(parsedPrice) && parsedPrice >= 0 ? parsedPrice : null;
-      } catch (error) {
-        log.warn("onchain_price_lookup_failed", {
-          ...errorFields(error),
-          chain: normalizedChain,
-          address,
-        });
-      }
-
-      if (!marketAddress) {
-        log.info("onchain_market_not_found", { chain: normalizedChain, address });
-        await replyChunks(
-          ctx,
-          formatError(`No usable ${normalizedChain} market pair found for ${address}`),
-        );
-        return;
-      }
+    if (!marketAddress) {
+      log.info("onchain_market_not_found", { chain, address });
+      await replyChunks(ctx, formatError(`No usable ${chain} market pair found for ${address}`));
+      return;
     }
 
     const outcome = await deps.onchain.analyze({
-      chain: normalizedChain,
+      chain,
       address,
       windowMinutes: requestedWindow,
       priceUsd,
@@ -385,11 +416,41 @@ async function runAndReply(
       return;
     }
 
+    const token = repo.getToken(address);
+
     if (!outcome.pair) {
+      // Pre-graduation pump.fun mints have no Dexscreener pair yet, but ScanService
+      // still scores them via the on-chain bonding-curve path.
+      if (outcome.metrics.bondingProgressPct !== undefined) {
+        log.info("scan_completed", {
+          address,
+          symbol: token?.symbol ?? "TOKEN",
+          score: outcome.score.total,
+          verdict: outcome.score.verdict,
+          provisional: outcome.score.provisional,
+          bondingCurve: true,
+        });
+        await replyChunks(
+          ctx,
+          formatScanReport({
+            symbol: token?.symbol ?? "TOKEN",
+            metrics: outcome.metrics,
+            score: outcome.score,
+            pair: null,
+            firstSeenAt: token?.first_seen_at ?? null,
+            recommendMinScore: deps.config.recommendMinScore,
+          }),
+        );
+        return;
+      }
+
       log.info("scan_no_pair", { address });
       await replyChunks(
         ctx,
-        formatError(`No usable market pair for <code>${address}</code>`),
+        formatError(
+          outcome.sentimentNote ??
+            `No usable market pair for <code>${address}</code>`,
+        ),
       );
       return;
     }
@@ -402,7 +463,6 @@ async function runAndReply(
       provisional: outcome.score.provisional,
     });
 
-    const token = repo.getToken(address);
     const text = formatScanReport({
       symbol: token?.symbol ?? outcome.pair.baseToken.symbol ?? "TOKEN",
       metrics: outcome.metrics,

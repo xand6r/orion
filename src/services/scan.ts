@@ -12,10 +12,14 @@ import {
   type DexPair,
 } from "../providers/dexscreener.js";
 import {
+  applyBirdeyeAdjustment,
+  applyMintRiskAdjustment,
+  applyRugCheckAdjustment,
   applySentimentAdjustment,
   scoreOpportunity,
   type ScoreResult,
 } from "../scoring/engine.js";
+import { scoreBondingCurve } from "../scoring/bonding.js";
 import type { DerivedMetrics } from "../metrics/derive.js";
 import type { ScanRow } from "../db/repo.js";
 import type { OnchainSentimentService } from "../onchain/service.js";
@@ -23,6 +27,10 @@ import {
   toSentimentSnapshot,
   type SentimentSnapshot,
 } from "../onchain/snapshot.js";
+import type { MintRiskService, MintRiskSnapshot } from "../onchain/mintrisk.js";
+import type { RugCheckService, RugCheckSnapshot } from "../onchain/rugcheck.js";
+import type { BirdeyeService, BirdeyeSnapshot } from "../providers/birdeye.js";
+import type { PumpFunService, PumpFunSnapshot } from "../onchain/pumpfun.js";
 
 /** Who triggered the scan — affects follow-up scheduling and watchlist auto-add. */
 export type ScanSource = "organic" | "manual_scan" | "followup";
@@ -65,6 +73,10 @@ export class ScanService {
       log: Logger;
       onchain?: OnchainSentimentService | null;
       sentimentWindowMinutes?: number;
+      mintRisk?: MintRiskService | null;
+      rugCheck?: RugCheckService | null;
+      birdeye?: BirdeyeService | null;
+      pumpFun?: PumpFunService | null;
     },
   ) { }
 
@@ -102,24 +114,57 @@ export class ScanService {
       const mentions = emptyMentions();
 
       if (!selected) {
-        const metrics = deriveMetrics({
+        let metrics = deriveMetrics({
           pair: emptyPair(tokenAddress, chain),
           now,
           mentions,
         });
-        const score = scoreOpportunity({
-          metrics,
-          config,
-          comparableMetrics: repo.listBaselineMetrics(tokenAddress),
-          hasPrimaryPair: false,
-        });
+
+        // No Dexscreener pair yet (fresh / pre-graduation token) — mint-level
+        // checks don't need a market, so still worth running.
+        let mintRisk: MintRiskSnapshot | null = null;
+        let rugCheck: RugCheckSnapshot | null = null;
+        let pumpFun: PumpFunSnapshot | null = null;
+        if (chain === "solana") {
+          if (this.deps.mintRisk) {
+            mintRisk = await this.deps.mintRisk.checkSolanaMint(tokenAddress);
+          }
+          if (this.deps.rugCheck) {
+            rugCheck = await this.deps.rugCheck.checkSolanaMint(tokenAddress);
+          }
+          if (this.deps.pumpFun) {
+            pumpFun = await this.deps.pumpFun.checkMint(tokenAddress);
+          }
+        }
+
+        let score: ScoreResult;
+        if (pumpFun?.exists && pumpFun.metrics) {
+          metrics = {
+            ...metrics,
+            bondingProgressPct: pumpFun.metrics.progressPct,
+            bondingSolRaised: pumpFun.metrics.solRaised,
+            bondingPriceSolPerToken: pumpFun.metrics.priceSolPerToken,
+            bondingMarketCapSol: pumpFun.metrics.marketCapSol,
+            bondingComplete: pumpFun.metrics.complete,
+          };
+          score = scoreBondingCurve({ metrics: pumpFun.metrics, config });
+        } else {
+          score = scoreOpportunity({
+            metrics,
+            config,
+            comparableMetrics: repo.listBaselineMetrics(tokenAddress),
+            hasPrimaryPair: false,
+          });
+        }
+        score = applyMintRiskAdjustment(score, mintRisk ? { ...mintRisk } : null, config);
+        score = applyRugCheckAdjustment(score, rugCheck, config);
 
         const scan = repo.insertScan({
           tokenAddress,
           source: input.source,
           metrics,
           score,
-          rawPayload: { pairs, chain },
+          rawPayload: { pairs, chain, mintRisk, rugCheck, pumpFun },
           sentiment: null,
         });
 
@@ -134,7 +179,10 @@ export class ScanService {
           allPairAddresses: pairs.map((p) => p.pairAddress),
           selectionReason: null,
           sentiment: null,
-          sentimentNote: `No primary ${chain} pool — sentiment skipped`,
+          sentimentNote:
+            pumpFun?.exists && pumpFun.metrics
+              ? "Pre-graduation pump.fun token — sentiment engine needs a Dexscreener pair"
+              : `No primary ${chain} pool — sentiment skipped`,
         };
       }
 
@@ -179,6 +227,30 @@ export class ScanService {
         score = applySentimentAdjustment(score, null, config);
       }
 
+      let mintRisk: MintRiskSnapshot | null = null;
+      let rugCheck: RugCheckSnapshot | null = null;
+      let birdeye: BirdeyeSnapshot | null = null;
+      if (chain === "solana") {
+        if (this.deps.mintRisk) {
+          mintRisk = await this.deps.mintRisk.checkSolanaMint(tokenAddress);
+        }
+        if (this.deps.rugCheck) {
+          rugCheck = await this.deps.rugCheck.checkSolanaMint(tokenAddress);
+        }
+        // Birdeye's free tier has a tight monthly quota — spend it on the
+        // baseline scan/watch only, not on every scheduled follow-up.
+        if (this.deps.birdeye && input.source !== "followup") {
+          birdeye = await this.deps.birdeye.checkSolanaToken(tokenAddress);
+        }
+      }
+      score = applyMintRiskAdjustment(
+        score,
+        mintRisk ? { ...mintRisk } : null,
+        config,
+      );
+      score = applyRugCheckAdjustment(score, rugCheck, config);
+      score = applyBirdeyeAdjustment(score, birdeye, config);
+
       const scan = repo.insertScan({
         tokenAddress,
         source: input.source,
@@ -193,6 +265,9 @@ export class ScanService {
           selectionReason: reason,
           marketScore: score.baseTotal,
           sentimentAdjustment: score.sentimentAdjustment,
+          mintRisk,
+          rugCheck,
+          birdeye,
         },
         metrics,
         score,

@@ -38,6 +38,12 @@ export type DerivedMetrics = {
   mentionVelocity1h: number | null;
   distinctSenders1h: number;
   minutesSinceFirstMention: number | null;
+  /** Present only for pre-graduation pump.fun tokens scored via the bonding-curve path. */
+  bondingProgressPct?: number;
+  bondingSolRaised?: number;
+  bondingPriceSolPerToken?: number;
+  bondingMarketCapSol?: number;
+  bondingComplete?: boolean;
 };
 
 function num(v: unknown): number | null {

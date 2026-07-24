@@ -19,6 +19,8 @@ export type ScoreResult = {
   baseTotal: number;
   /** Points added/subtracted from sentiment (0 when missing/insufficient). */
   sentimentAdjustment: number;
+  /** Points deducted for an active mint/freeze authority (0 when clean/unchecked). */
+  mintRiskPenalty?: number;
   total: number;
   verdict: Verdict;
   provisional: boolean;
@@ -28,7 +30,7 @@ export type ScoreResult = {
   dataQuality: "ok" | "incomplete" | "critical";
 };
 
-function clamp(n: number, lo: number, hi: number): number {
+export function clamp(n: number, lo: number, hi: number): number {
   return Math.max(lo, Math.min(hi, n));
 }
 
@@ -220,12 +222,6 @@ export function scoreOpportunity(input: {
     flags.push({ kind: "red", text: "Incomplete market data" });
   }
 
-  // Always remind: holder/deployer checks are out of POC scope.
-  flags.push({
-    kind: "red",
-    text: "Holder/deployer/mint risk not checked",
-  });
-
   const raw = marketQuality + marketActivity + attention + relativeValue - penalties;
   const baseTotal = clamp(Math.round(raw), 0, 100);
 
@@ -250,6 +246,7 @@ export function scoreOpportunity(input: {
     penalties: Math.round(penalties),
     baseTotal,
     sentimentAdjustment: 0,
+    mintRiskPenalty: 0,
     total: baseTotal,
     verdict,
     provisional,
@@ -326,9 +323,208 @@ export function applySentimentAdjustment(
   };
 }
 
+export type MintRiskInput = {
+  checked: boolean;
+  mintAuthorityRevoked: boolean | null;
+  freezeAuthorityRevoked: boolean | null;
+};
+
+/**
+ * Apply the Solana mint/freeze authority check as a further penalty + verdict cap.
+ * An active mint authority means the deployer can inflate supply at will; an active
+ * freeze authority means the deployer can lock your wallet out of selling. Either one
+ * is treated like critical data — the token is never allowed to score above WATCH.
+ * When the check could not run (unsupported chain, no API key, provider failure), the
+ * score is left untouched and a neutral flag records that the check was skipped.
+ */
+export function applyMintRiskAdjustment(
+  score: ScoreResult,
+  risk: MintRiskInput | null,
+  config: ScoringConfig,
+): ScoreResult {
+  const cfg = config.mintRisk;
+  if (!risk || !risk.checked || !cfg) {
+    const flags = dedupeFlags([
+      ...score.flags,
+      { kind: "red", text: "Mint/freeze authority not checked" },
+    ]).slice(0, 6);
+    return { ...score, mintRiskPenalty: score.mintRiskPenalty ?? 0, flags };
+  }
+
+  const mintActive = risk.mintAuthorityRevoked === false;
+  const freezeActive = risk.freezeAuthorityRevoked === false;
+
+  let penalty = 0;
+  const flags = [...score.flags];
+  if (mintActive) {
+    penalty += cfg.mintAuthorityActivePenalty;
+    flags.unshift({ kind: "red", text: "Mint authority still active — supply can be inflated" });
+  }
+  if (freezeActive) {
+    penalty += cfg.freezeAuthorityActivePenalty;
+    flags.unshift({ kind: "red", text: "Freeze authority still active — wallets can be frozen" });
+  }
+  if (!mintActive && !freezeActive) {
+    flags.unshift({ kind: "green", text: "Mint & freeze authority renounced" });
+  }
+
+  const total = clamp(score.total - penalty, 0, 100);
+  let verdict = verdictFor(total, config);
+  if (mintActive || freezeActive) {
+    verdict = capVerdict(verdict, "WATCH");
+  } else if (score.dataQuality === "critical") {
+    verdict = capVerdict(verdict, "WATCH");
+  } else if (score.dataQuality === "incomplete") {
+    verdict = capVerdict(verdict, "INVESTIGATE");
+  }
+
+  return {
+    ...score,
+    mintRiskPenalty: penalty,
+    total,
+    verdict,
+    flags: dedupeFlags(flags).slice(0, 6),
+  };
+}
+
+export type RugCheckAdjustmentInput = {
+  checked: boolean;
+  score: number | null;
+  riskLevel: string | null;
+  lpLocked: boolean | null;
+  topHoldersPct: number | null;
+};
+
+/**
+ * Apply RugCheck's public summary report as an independent second opinion on
+ * top of the Helius mint-risk check. Deliberately scored separately (its own
+ * penalties/flags) rather than merged, so a RugCheck outage never silently
+ * masks or duplicates the Helius-derived signal.
+ */
+export function applyRugCheckAdjustment(
+  score: ScoreResult,
+  risk: RugCheckAdjustmentInput | null,
+  config: ScoringConfig,
+): ScoreResult {
+  const cfg = config.rugcheck;
+  if (!risk || !risk.checked || !cfg) {
+    const flags = dedupeFlags([
+      ...score.flags,
+      { kind: "red", text: "RugCheck not checked" },
+    ]).slice(0, 6);
+    return { ...score, flags };
+  }
+
+  let penalty = 0;
+  const flags = [...score.flags];
+
+  if (risk.score !== null && risk.score < cfg.minScore) {
+    penalty += cfg.lowScorePenalty;
+    flags.unshift({
+      kind: "red",
+      text: `RugCheck score ${risk.score} below ${cfg.minScore} threshold`,
+    });
+  }
+  if (cfg.requireLpLocked && risk.lpLocked === false) {
+    penalty += cfg.unlockedLpPenalty;
+    flags.unshift({ kind: "red", text: "Liquidity pool is not locked" });
+  }
+  if (risk.topHoldersPct !== null && risk.topHoldersPct > cfg.maxTopHoldersPct) {
+    penalty += cfg.highConcentrationPenalty;
+    flags.unshift({
+      kind: "red",
+      text: `Top holders control ${risk.topHoldersPct.toFixed(0)}% of supply`,
+    });
+  }
+  if (penalty === 0) {
+    flags.unshift({
+      kind: "green",
+      text: `RugCheck clean${risk.score !== null ? ` (score ${risk.score})` : ""}`,
+    });
+  }
+
+  const total = clamp(score.total - penalty, 0, 100);
+  let verdict = verdictFor(total, config);
+  if (penalty > 0) {
+    verdict = capVerdict(verdict, "WATCH");
+  } else if (score.dataQuality === "critical") {
+    verdict = capVerdict(verdict, "WATCH");
+  } else if (score.dataQuality === "incomplete") {
+    verdict = capVerdict(verdict, "INVESTIGATE");
+  }
+
+  return {
+    ...score,
+    total,
+    verdict,
+    flags: dedupeFlags(flags).slice(0, 6),
+  };
+}
+
+export type BirdeyeAdjustmentInput = {
+  checked: boolean;
+  creatorPercentage: number | null;
+  holders: number | null;
+};
+
+/**
+ * Apply Birdeye's dev/creator holding % and raw holder count as a further,
+ * independent cross-check. Deliberately narrow (two signals) to fit the free
+ * tier's tight quota — this is not meant to duplicate RugCheck's concentration
+ * check, just add a differently-sourced creator-holding and thin-distribution
+ * signal.
+ */
+export function applyBirdeyeAdjustment(
+  score: ScoreResult,
+  data: BirdeyeAdjustmentInput | null,
+  config: ScoringConfig,
+): ScoreResult {
+  const cfg = config.birdeye;
+  if (!data || !data.checked || !cfg) {
+    const flags = dedupeFlags([
+      ...score.flags,
+      { kind: "red", text: "Birdeye not checked" },
+    ]).slice(0, 6);
+    return { ...score, flags };
+  }
+
+  let penalty = 0;
+  const flags = [...score.flags];
+
+  if (data.creatorPercentage !== null && data.creatorPercentage > cfg.maxCreatorHoldingPct) {
+    penalty += cfg.creatorHoldingPenalty;
+    flags.unshift({
+      kind: "red",
+      text: `Creator wallet holds ${data.creatorPercentage.toFixed(1)}% of supply`,
+    });
+  }
+  if (data.holders !== null && data.holders < cfg.minHolders) {
+    penalty += cfg.lowHolderPenalty;
+    flags.unshift({ kind: "red", text: `Only ${data.holders} holders so far` });
+  }
+  if (penalty === 0) {
+    flags.unshift({ kind: "green", text: "Birdeye: creator holding and holder count look healthy" });
+  }
+
+  const total = clamp(score.total - penalty, 0, 100);
+  let verdict = verdictFor(total, config);
+  if (score.dataQuality === "critical") {
+    verdict = capVerdict(verdict, "WATCH");
+  } else if (score.dataQuality === "incomplete") {
+    verdict = capVerdict(verdict, "INVESTIGATE");
+  }
+
+  return {
+    ...score,
+    total,
+    verdict,
+    flags: dedupeFlags(flags).slice(0, 6),
+  };
+}
+
 const VERDICT_ORDER: Verdict[] = ["IGNORE", "WATCH", "INVESTIGATE", "HIGH ATTENTION"];
 
-function capVerdict(verdict: Verdict, max: Verdict): Verdict {
+export function capVerdict(verdict: Verdict, max: Verdict): Verdict {
   return VERDICT_ORDER.indexOf(verdict) > VERDICT_ORDER.indexOf(max) ? max : verdict;
 }
 
@@ -338,14 +534,14 @@ function percentileRank(value: number | null, samples: number[]): number | null 
   return atOrBelow / samples.length;
 }
 
-function verdictFor(total: number, config: ScoringConfig): Verdict {
+export function verdictFor(total: number, config: ScoringConfig): Verdict {
   if (total <= config.verdicts.ignoreMax) return "IGNORE";
   if (total <= config.verdicts.watchMax) return "WATCH";
   if (total <= config.verdicts.investigateMax) return "INVESTIGATE";
   return "HIGH ATTENTION";
 }
 
-function dedupeFlags(flags: ScoreFlag[]): ScoreFlag[] {
+export function dedupeFlags(flags: ScoreFlag[]): ScoreFlag[] {
   const seen = new Set<string>();
   const out: ScoreFlag[] = [];
   for (const f of flags) {

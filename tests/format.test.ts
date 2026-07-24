@@ -103,7 +103,7 @@ describe("telegram formatting", () => {
       firstSeenAt: "2026-07-20T14:32:00.000Z",
       recommendMinScore: 65,
     });
-    expect(text).toContain("<b>ORION</b>  ·  $TOKEN");
+    expect(text).toContain("<b>ORION</b> · $TOKEN");
     expect(text).toContain("<b>68</b>/100 ✅");
     expect(text).toContain("23m old");
     expect(text).toContain("✅ Recommended (≥65)");
@@ -112,14 +112,16 @@ describe("telegram formatting", () => {
     expect(text).toContain("Δ +18%");
     expect(text).toContain("Buys/Sells 184/91");
     expect(text).toContain("Vol/MC +53%");
-    expect(text).toContain("Peers: provisional");
-    expect(text).toContain("Quality 16/25");
-    expect(text).toContain("Momentum 19/25");
-    expect(text).toContain("<b>Blend</b>");
-    expect(text).toContain("Final <b>68</b>/100");
+    expect(text).toContain("5 peers (&lt;1h, provisional)");
+    expect(text).toContain("Quality 16 · Activity 20 · Momentum 19 · Value 13");
     expect(text).toContain("First seen 14:32 UTC");
     expect(text).toContain("🔗");
     expect(text).not.toContain("Breadth");
+    // Flags (the pros/cons) should render before the raw Market numbers.
+    expect(text.indexOf("Flags")).toBeLessThan(text.indexOf("<b>Market</b>"));
+    // No sentiment adjustment on this fixture, so the blend line is pure noise — hidden.
+    expect(text).not.toContain("Blend");
+    expect(text).not.toContain("Sentiment");
   });
 
   it("shows sentiment blend on scan without full sentiment dump", () => {
@@ -130,8 +132,8 @@ describe("telegram formatting", () => {
       pair: null,
       recommendMinScore: 65,
     });
-    expect(text).toContain("Market 68 → Final <b>76</b>/100");
-    expect(text).toContain("sentiment +8");
+    expect(text).toContain("market 68 → final <b>76</b>/100");
+    expect(text).toContain("Sentiment +8");
     expect(text).not.toContain("Accel");
   });
 
@@ -146,6 +148,42 @@ describe("telegram formatting", () => {
     expect(text).toContain("<b>29</b>/100 ⛔");
     expect(text).toContain("⛔ Not recommended (need ≥65)");
     expect(text).toContain("SKIP");
+  });
+
+  it("renders a bonding-curve report instead of the Market section", () => {
+    const text = formatScanReport({
+      symbol: "NEWCOIN",
+      metrics: {
+        ...metrics,
+        marketCapUsd: null,
+        liquidityUsd: null,
+        bondingProgressPct: 62.4,
+        bondingSolRaised: 42.1,
+        bondingPriceSolPerToken: 0.00002841,
+        bondingMarketCapSol: 28.4,
+        bondingComplete: false,
+      },
+      score: {
+        ...score,
+        marketQuality: 0,
+        marketActivity: 0,
+        attention: 0,
+        relativeValue: 0,
+        cohort: "pumpfun-bonding-curve",
+        comparableCount: 0,
+        dataQuality: "critical",
+        provisional: true,
+      },
+      pair: null,
+      recommendMinScore: 65,
+    });
+    expect(text).toContain("Bonding Curve");
+    expect(text).toContain("Progress 62.4%");
+    expect(text).toContain("still on curve");
+    expect(text).toContain("Raised 42.10 SOL");
+    expect(text).not.toContain("<b>Market</b>");
+    expect(text).not.toContain("Quality 0/25");
+    expect(text).toContain("Provisional bonding-curve score");
   });
 
   it("formats large market caps as billions", () => {
@@ -202,11 +240,11 @@ describe("telegram formatting", () => {
       },
     });
 
-    expect(text).toContain("<b>ORION SENTIMENT</b>  ·  <b>82</b>/100  ·  STRONG");
-    expect(text).toContain("15m  ·  SOLANA  ·  OK");
-    expect(text).toContain("Buy $500.00  ·  Sell $125.00  ·  Net +$375.00");
-    expect(text).toContain("Buyers 12  ·  Sellers 4  ·  Self-traders 2");
-    expect(text).toContain("Growth +50% (prev 8)  ·  Top5 35%");
+    expect(text).toContain("<b>ORION SENTIMENT</b> · <b>82</b>/100 · STRONG");
+    expect(text).toContain("15m · SOLANA · OK");
+    expect(text).toContain("Buy $500.00 · Sell $125.00 · Net +$375.00");
+    expect(text).toContain("Buyers 12 · Sellers 4 · Self-traders 2");
+    expect(text).toContain("Growth +50% (prev 8) · Top5 35%");
     expect(text).toContain("Breadth 22/25");
     expect(text).toContain("✅ Broad buyer participation");
     expect(text).toContain("Window truncated");
@@ -273,7 +311,7 @@ describe("telegram formatting", () => {
       },
       pairUrl: "https://dexscreener.com/solana/PairX",
     });
-    expect(text).toContain("<b>ORION FOLLOW-UP</b>  ·  15m  ·  $TOKEN");
+    expect(text).toContain("<b>ORION FOLLOW-UP</b> · 15m · $TOKEN");
     expect(text).toContain("<b>Return +25%</b>");
     expect(text).toContain("📈");
     expect(text).toContain("<b>Deltas</b>");

@@ -16,6 +16,8 @@ const schema = z.object({
   TELEGRAM_BOT_TOKEN: z.string().min(1, "TELEGRAM_BOT_TOKEN is required"),
   ALLOWED_CHAT_IDS: z.string().default(""),
   HELIUS_API_KEY: z.string().optional(),
+  /** Optional; free Standard tier works but has a tight 30k CU/month cap. Birdeye checks are skipped without it. */
+  BIRDEYE_API_KEY: z.string().optional(),
   /** Optional override; defaults to ./config/app.json */
   APP_CONFIG_PATH: z.string().default("./config/app.json"),
 });
@@ -29,6 +31,7 @@ export function loadEnv(overrides: Partial<Record<keyof z.infer<typeof schema>, 
     TELEGRAM_BOT_TOKEN: overrides.TELEGRAM_BOT_TOKEN ?? process.env.TELEGRAM_BOT_TOKEN,
     ALLOWED_CHAT_IDS: overrides.ALLOWED_CHAT_IDS ?? process.env.ALLOWED_CHAT_IDS,
     HELIUS_API_KEY: overrides.HELIUS_API_KEY ?? process.env.HELIUS_API_KEY,
+    BIRDEYE_API_KEY: overrides.BIRDEYE_API_KEY ?? process.env.BIRDEYE_API_KEY,
     APP_CONFIG_PATH: overrides.APP_CONFIG_PATH ?? process.env.APP_CONFIG_PATH,
   });
 

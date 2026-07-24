@@ -28,7 +28,7 @@
     "goodVolumeToMcap1h": 0.3
   },
   "relativeValue": {
-    "provisionalUntilComparableScans": 30,
+    "provisionalUntilComparableScans": 8,
     "goodVolumeToMcap1h": 0.3
   },
   "penalties": {
@@ -51,6 +51,32 @@
     "weak": -12,
     "provisionalMaxAbs": 2,
     "insufficientMaxAbs": 0
+  },
+  "mintRisk": {
+    "mintAuthorityActivePenalty": 25,
+    "freezeAuthorityActivePenalty": 20
+  },
+  "rugcheck": {
+    "minScore": 80,
+    "maxTopHoldersPct": 40,
+    "requireLpLocked": true,
+    "lowScorePenalty": 20,
+    "unlockedLpPenalty": 15,
+    "highConcentrationPenalty": 15
+  },
+  "birdeye": {
+    "maxCreatorHoldingPct": 12,
+    "minHolders": 75,
+    "creatorHoldingPenalty": 15,
+    "lowHolderPenalty": 8
+  },
+  "bondingCurve": {
+    "sweetSpotMinPct": 40,
+    "sweetSpotMaxPct": 90,
+    "progressWeight": 55,
+    "raiseWeight": 45,
+    "fullRaiseSol": 85,
+    "maxVerdict": "INVESTIGATE"
   },
   "autoWatchMinScore": 65,
   "recommendMinScore": 65,

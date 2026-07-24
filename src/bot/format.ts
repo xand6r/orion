@@ -73,8 +73,14 @@ function cohortLabel(cohort: string): string {
     "1-7d": "1–7d",
     ">7d": ">7d",
     unknown: "?",
+    "pumpfun-bonding-curve": "pre-grad",
   };
   return labels[cohort] ?? cohort;
+}
+
+function fmtSol(n: number | null | undefined): string {
+  if (n === null || n === undefined || !Number.isFinite(n)) return "n/a";
+  return `${n.toFixed(2)} SOL`;
 }
 
 function fmtSigned(n: number | null | undefined, digits = 0): string {
@@ -107,22 +113,17 @@ export function formatSentimentEmbed(
   ];
 }
 
-/** Market → final blend for /scan (important bits only). */
+/**
+ * Market → final blend for /scan. Only worth a line when sentiment actually
+ * moved the score — otherwise it's just noise repeating the header total.
+ */
 export function formatScoreBlend(score: ScoreResult): string[] {
   const adj = score.sentimentAdjustment ?? 0;
+  if (adj === 0) return [];
   const base = score.baseTotal ?? score.total;
-  if (adj === 0) {
-    return [
-      "",
-      section("Blend"),
-      `Market ${base} · Sentiment — · Final <b>${score.total}</b>/100`,
-    ];
-  }
   const arrow = adj > 0 ? "📈" : "📉";
   return [
-    "",
-    section("Blend"),
-    `Market ${base} → Final <b>${score.total}</b>/100  ${arrow} sentiment ${adj > 0 ? "+" : ""}${adj}`,
+    `${arrow} Sentiment ${adj > 0 ? "+" : ""}${adj} · market ${base} → final <b>${score.total}</b>/100`,
   ];
 }
 
@@ -155,7 +156,8 @@ export function formatKeyDeltas(input: {
   }
   if (!from || !to) {
     lines.push(
-      `Sentiment ${from?.score ?? "n/a"} → ${to?.score ?? "n/a"} · ${escapeHtml(to?.verdict ?? from?.verdict ?? "")}`,
+      `Sentiment ${from?.score ?? "n/a"} → ${to?.score ?? "n/a"}`,
+      escapeHtml(to?.verdict ?? from?.verdict ?? ""),
     );
     return lines;
   }
@@ -171,7 +173,8 @@ export function formatKeyDeltas(input: {
       : null;
 
   lines.push(
-    `Sentiment ${from.score} → ${to.score} (${fmtSigned(sentDelta)}) · ${escapeHtml(from.verdict)} → ${escapeHtml(to.verdict)}`,
+    `Sentiment ${from.score} → ${to.score} (${fmtSigned(sentDelta)})`,
+    `${escapeHtml(from.verdict)} → ${escapeHtml(to.verdict)}`,
     `Buyers ${from.uniqueBuyers} → ${to.uniqueBuyers} (${fmtSigned(buyersDelta)})`,
     `Net ${fmtNetFlow(from.netFlowUsd)} → ${fmtNetFlow(to.netFlowUsd)}${netDelta === null ? "" : ` (${fmtNetFlow(netDelta)})`}`,
   );
@@ -202,42 +205,62 @@ export function formatScanReport(input: {
 
   const volToMc =
     m.volume1hToMarketCap === null ? "n/a" : fmtPct(m.volume1hToMarketCap * 100);
+  const isBondingCurve = m.bondingProgressPct !== undefined;
+
+  const marketOrBondingLines = isBondingCurve
+    ? [
+        section("Bonding Curve"),
+        `Progress ${m.bondingProgressPct?.toFixed(1)}% · ${m.bondingComplete ? "complete (should have a DEX pair soon)" : "still on curve"}`,
+        `Raised ${fmtSol(m.bondingSolRaised)} · Price ${m.bondingPriceSolPerToken?.toPrecision(4)} SOL · MCap ${fmtSol(m.bondingMarketCapSol)}`,
+      ]
+    : [
+        section("Market"),
+        `MC ${fmtUsd(m.marketCapUsd)} · FDV ${fmtUsd(m.fdvUsd)} · Liq ${fmtUsd(m.liquidityUsd)}`,
+        `Vol 1h ${fmtUsd(m.volume1hUsd)} · Δ ${fmtPriceDelta(m.priceChange1hPct)} · Buys/Sells ${m.buys1h ?? "n/a"}/${m.sells1h ?? "n/a"} · Vol/MC ${volToMc}`,
+      ];
+
+  const scoreLine = isBondingCurve
+    ? "Provisional bonding-curve score — no peer cohort, no liquidity/momentum data yet"
+    : [
+        `Quality ${score.marketQuality} · Activity ${score.marketActivity} · Momentum ${score.attention} · Value ${score.relativeValue} (each /25)`,
+        score.penalties > 0 ? ` · Penalties −${score.penalties}` : "",
+      ].join("");
+
+  // Peers live in the header, next to age, instead of a separate repeated line below.
+  const peers = isBondingCurve
+    ? ""
+    : ` · ${score.comparableCount} peers (${escapeHtml(cohortLabel(score.cohort))}${
+        score.provisional ? ", provisional" : ""
+      })`;
 
   const lines: string[] = [
-    `<b>ORION</b>  ·  $${sym}`,
-    `<b>${score.total}</b>/100 ${mark}  ·  ${fmtAge(m.pairAgeMinutes)} old  ·  ${shortVerdict(score.verdict)}`,
+    `<b>ORION</b> · $${sym}`,
+    `<b>${score.total}</b>/100 ${mark} ${shortVerdict(score.verdict)} · ${fmtAge(m.pairAgeMinutes)} old${peers}`,
     recommended
       ? `✅ Recommended (≥${recommendMin})`
       : `⛔ Not recommended (need ≥${recommendMin})`,
-    score.provisional ? "Peers: provisional" : "Peers: ready",
-    "",
-    section("Market"),
-    `MC ${fmtUsd(m.marketCapUsd)}  ·  FDV ${fmtUsd(m.fdvUsd)}  ·  Liq ${fmtUsd(m.liquidityUsd)}`,
-    `Vol 1h ${fmtUsd(m.volume1hUsd)}  ·  Δ ${fmtPriceDelta(m.priceChange1hPct)}`,
-    `Buys/Sells ${m.buys1h ?? "n/a"}/${m.sells1h ?? "n/a"}  ·  Vol/MC ${volToMc}`,
-    "",
-    section("Score"),
-    `Quality ${score.marketQuality}/25  ·  Activity ${score.marketActivity}/25`,
-    `Momentum ${score.attention}/25  ·  Value ${score.relativeValue}/25`,
-    score.penalties > 0 ? `Penalties −${score.penalties}` : null,
-    `Age ${escapeHtml(cohortLabel(score.cohort))}  ·  Peers ${score.comparableCount}`,
     ...formatScoreBlend(score),
-  ].filter((line): line is string => line !== null);
+  ];
 
+  // Flags carry the actual "why" — surface them right under the header,
+  // ahead of the raw market/score numbers, so the take is visible at a glance.
   const flags = score.flags.filter(
-    (f) => !f.text.toLowerCase().includes("holder/deployer"),
+    (f) => !f.text.toLowerCase().includes("not checked"),
   );
   if (flags.length) {
     lines.push("", section("Flags"));
     for (const f of flags.slice(0, 4)) lines.push(flagLine(f.kind, f.text));
   }
 
+  lines.push("", ...marketOrBondingLines);
+  lines.push("", section("Score"), scoreLine);
+
   lines.push("");
   if (pair?.url) {
     lines.push(`🔗 <a href="${escapeHtml(pair.url)}">Dexscreener</a>`);
   }
   if (pair?.dexId) {
-    lines.push(`${escapeHtml(pair.dexId)}  ·  <code>${escapeHtml(pair.pairAddress)}</code>`);
+    lines.push(`${escapeHtml(pair.dexId)} · <code>${escapeHtml(pair.pairAddress)}</code>`);
   }
   if (firstSeen) {
     lines.push(`First seen ${firstSeen}`);
@@ -260,19 +283,26 @@ export function formatTokenReport(input: {
 
   const scoreDelta =
     first && first.id !== latest.id ? latest.score_total - first.score_total : null;
+  const isBondingCurve = metrics.bondingProgressPct !== undefined;
+  const verdictLine = `${escapeHtml(latest.verdict)}${
+    scoreDelta !== null ? ` · since first ${scoreDelta >= 0 ? "+" : ""}${scoreDelta}` : ""
+  }`;
 
   const lines: string[] = [
-    `<b>ORION REPORT</b>  ·  $${sym}  ·  <b>${latest.score_total}</b>/100`,
+    `<b>ORION REPORT</b> · $${sym} · <b>${latest.score_total}</b>/100`,
     `<code>${escapeHtml(token.address)}</code>`,
-    "",
-    section("Market"),
-    `${escapeHtml(latest.verdict)}${
-      scoreDelta !== null ? `  ·  since first ${scoreDelta >= 0 ? "+" : ""}${scoreDelta}` : ""
-    }`,
-    `MC ${fmtUsd(latest.market_cap_usd)}  ·  Liq ${fmtUsd(latest.liquidity_usd)}  ·  Price ${fmtUsd(latest.price_usd)}`,
-    `Vol/MC 1h ${fmtPct(metrics.volume1hToMarketCap === null ? null : metrics.volume1hToMarketCap * 100)}`,
-    ...formatSentimentEmbed(parseSentimentSnapshot(latest.sentiment_json)),
+    verdictLine,
   ];
+
+  // Flags carry the actual "why" — surface them right under the header,
+  // ahead of follow-up history and raw market numbers.
+  const usefulFlags = flags.filter(
+    (f) => !f.text.toLowerCase().includes("not checked"),
+  );
+  if (usefulFlags.length) {
+    lines.push("", section("Flags"));
+    for (const f of usefulFlags.slice(0, 4)) lines.push(flagLine(f.kind, f.text));
+  }
 
   const done = followups.filter((f) => f.status !== "pending");
   if (done.length) {
@@ -281,7 +311,7 @@ export function formatTokenReport(input: {
       const sent =
         f.sentiment_score === null || f.sentiment_score === undefined
           ? ""
-          : `  ·  sent ${f.sentiment_score}`;
+          : ` · sent ${f.sentiment_score}`;
       const retEmoji =
         f.return_pct === null || !Number.isFinite(f.return_pct)
           ? "•"
@@ -291,7 +321,7 @@ export function formatTokenReport(input: {
               ? "📉"
               : "•";
       lines.push(
-        `${retEmoji} ${f.horizon}: ${escapeHtml(f.status)} ${fmtPct(f.return_pct)}  ·  mkt ${f.score_total ?? "n/a"}${sent}`,
+        `${retEmoji} ${f.horizon}: ${escapeHtml(f.status)} ${fmtPct(f.return_pct)} · mkt ${f.score_total ?? "n/a"}${sent}`,
       );
     }
   } else {
@@ -301,13 +331,21 @@ export function formatTokenReport(input: {
     }
   }
 
-  const usefulFlags = flags.filter(
-    (f) => !f.text.toLowerCase().includes("holder/deployer"),
+  lines.push(
+    "",
+    ...(isBondingCurve
+      ? [
+          section("Bonding Curve"),
+          `Progress ${metrics.bondingProgressPct?.toFixed(1)}% · ${metrics.bondingComplete ? "complete" : "still on curve"}`,
+          `Raised ${fmtSol(metrics.bondingSolRaised)} · MCap ${fmtSol(metrics.bondingMarketCapSol)}`,
+        ]
+      : [
+          section("Market"),
+          `MC ${fmtUsd(latest.market_cap_usd)} · Liq ${fmtUsd(latest.liquidity_usd)} · Price ${fmtUsd(latest.price_usd)}`,
+          `Vol/MC 1h ${fmtPct(metrics.volume1hToMarketCap === null ? null : metrics.volume1hToMarketCap * 100)}`,
+          ...formatSentimentEmbed(parseSentimentSnapshot(latest.sentiment_json)),
+        ]),
   );
-  if (usefulFlags.length) {
-    lines.push("", section("Flags"));
-    for (const f of usefulFlags.slice(0, 4)) lines.push(flagLine(f.kind, f.text));
-  }
 
   if (notes.length) {
     lines.push("", section("Notes"));
@@ -334,14 +372,14 @@ export function formatTop(
   period: string,
 ): string {
   if (!rows.length) {
-    return `<b>ORION</b>  ·  TOP ${escapeHtml(period.toUpperCase())}\nNo tokens first-seen in this window.`;
+    return `<b>ORION</b> · TOP ${escapeHtml(period.toUpperCase())}\nNo tokens first-seen in this window.`;
   }
 
-  const lines = [`<b>ORION</b>  ·  🏆 TOP ${escapeHtml(period.toUpperCase())}`, ""];
+  const lines = [`<b>ORION</b> · 🏆 TOP ${escapeHtml(period.toUpperCase())}`, ""];
   rows.forEach((r, i) => {
     const sym = escapeHtml(r.symbol ?? "TOKEN");
-    lines.push(`${i + 1}. <b>$${sym}</b>  ·  ${r.score_total}  ·  ${escapeHtml(r.verdict)}`);
-    lines.push(`   <code>${escapeHtml(r.token_address)}</code>`);
+    lines.push(`${i + 1}. <b>$${sym}</b> · ${r.score_total} · ${escapeHtml(r.verdict)}`);
+    lines.push(`↳ <code>${escapeHtml(r.token_address)}</code>`);
   });
   return lines.join("\n");
 }
@@ -362,8 +400,8 @@ export function formatRank(input: {
   const { rows, mode, minScore } = input;
   const title =
     mode === "viable"
-      ? `<b>ORION</b>  ·  ✅ VIABLE (≥${minScore ?? 65})`
-      : `<b>ORION</b>  ·  📋 RANK`;
+      ? `<b>ORION</b> · ✅ VIABLE (≥${minScore ?? 65})`
+      : `<b>ORION</b> · 📋 RANK`;
 
   if (!rows.length) {
     return mode === "viable"
@@ -376,10 +414,10 @@ export function formatRank(input: {
     const sym = escapeHtml(r.symbol ?? "TOKEN");
     const badge = r.score_total >= (minScore ?? 65) ? "✅" : "•";
     lines.push(
-      `${i + 1}. ${badge} <b>$${sym}</b>  ·  <b>${r.score_total}</b>/100  ·  ${escapeHtml(r.verdict)}`,
+      `${i + 1}. ${badge} <b>$${sym}</b> · <b>${r.score_total}</b>/100 · ${escapeHtml(r.verdict)}`,
     );
-    lines.push(`   MC ${fmtUsd(r.market_cap_usd)}  ·  Liq ${fmtUsd(r.liquidity_usd)}`);
-    lines.push(`   <code>${escapeHtml(r.token_address)}</code>`);
+    lines.push(`↳ MC ${fmtUsd(r.market_cap_usd)} · Liq ${fmtUsd(r.liquidity_usd)}`);
+    lines.push(`↳ <code>${escapeHtml(r.token_address)}</code>`);
   });
   return lines.join("\n");
 }
@@ -418,10 +456,10 @@ export function formatFollowupNotification(input: {
     input.status === "completed" ? "✅" : input.status === "unpriced" ? "⚠️" : "⛔";
 
   const lines: string[] = [
-    `<b>ORION FOLLOW-UP</b>  ·  ${escapeHtml(input.horizon)}  ·  $${sym}`,
+    `<b>ORION FOLLOW-UP</b> · ${escapeHtml(input.horizon)} · $${sym}`,
     `<code>${escapeHtml(input.address)}</code>`,
     "",
-    `${retEmoji} <b>Return ${ret}</b>  ·  ${statusEmoji} ${escapeHtml(input.status)}`,
+    `${retEmoji} <b>Return ${ret}</b> · ${statusEmoji} ${escapeHtml(input.status)}`,
     `Price ${fmtUsd(input.baselinePriceUsd)} → ${fmtUsd(input.followupPriceUsd)}`,
     `MC ${fmtUsd(input.baselineMarketCapUsd)} → ${fmtUsd(input.followupMarketCapUsd)}`,
     `Liq ${fmtUsd(input.baselineLiquidityUsd)} → ${fmtUsd(input.followupLiquidityUsd)}`,
@@ -445,7 +483,7 @@ export function formatFollowupNotification(input: {
 }
 
 export function formatError(message: string): string {
-  return `<b>ORION</b>  ·  ⛔ error\n${escapeHtml(message)}`;
+  return `<b>ORION</b> · ⛔ error\n${escapeHtml(message)}`;
 }
 
 export function formatBasicStats(stats: {
@@ -519,8 +557,8 @@ export function formatOnchainSentimentReport(result: OnchainSentimentSuccess): s
     m.buySellVolumeRatio === null ? "n/a" : `${m.buySellVolumeRatio.toFixed(2)}x`;
 
   const lines = [
-    `<b>ORION SENTIMENT</b>  ·  <b>${score.total}</b>/100  ·  ${escapeHtml(score.verdict)}`,
-    `${m.windowMinutes}m  ·  ${escapeHtml(result.chain.toUpperCase())}  ·  ${confidence}`,
+    `<b>ORION SENTIMENT</b> · <b>${score.total}</b>/100 · ${escapeHtml(score.verdict)}`,
+    `${m.windowMinutes}m · ${escapeHtml(result.chain.toUpperCase())} · ${confidence}`,
     `<code>${escapeHtml(result.address)}</code>`,
     "",
     section("Flow"),
@@ -533,15 +571,15 @@ export function formatOnchainSentimentReport(result: OnchainSentimentSuccess): s
     );
   } else {
     lines.push(
-      `Buy ${fmtUsd(m.buyVolumeUsd)}  ·  Sell ${fmtUsd(m.sellVolumeUsd)}  ·  Net ${netUsd}`,
+      `Buy ${fmtUsd(m.buyVolumeUsd)} · Sell ${fmtUsd(m.sellVolumeUsd)} · Net ${netUsd}`,
     );
     lines.push(`Swaps buy/sell ${m.buyCount}/${m.sellCount}`);
   }
 
   lines.push(
-    `Buyers ${m.uniqueBuyers}  ·  Sellers ${m.uniqueSellers}${m.selfTradingWallets > 0 ? `  ·  Self-traders ${m.selfTradingWallets}` : ""}`,
-    `Buyer/seller ${buyerSeller}  ·  Buy/sell vol ${buySellVol}`,
-    `Growth ${growth} (prev ${m.previousUniqueBuyers})  ·  Top5 ${concentration}`,
+    `Buyers ${m.uniqueBuyers} · Sellers ${m.uniqueSellers}${m.selfTradingWallets > 0 ? ` · Self-traders ${m.selfTradingWallets}` : ""}`,
+    `Buyer/seller ${buyerSeller} · Buy/sell vol ${buySellVol}`,
+    `Growth ${growth} (prev ${m.previousUniqueBuyers}) · Top5 ${concentration}`,
     `Analyzed swaps ${m.analyzedSwaps}`,
     "",
     section("Score parts"),
@@ -562,7 +600,7 @@ export function formatOnchainSentimentReport(result: OnchainSentimentSuccess): s
 
   lines.push(
     "",
-    `Provider ${escapeHtml(result.provider)}  ·  tx ${result.inspectedTransactions}`,
+    `Provider ${escapeHtml(result.provider)} · tx ${result.inspectedTransactions}`,
     result.marketAddress
       ? `Pool <code>${escapeHtml(result.marketAddress)}</code>`
       : "Pool n/a",

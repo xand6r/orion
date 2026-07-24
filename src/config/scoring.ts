@@ -62,6 +62,40 @@ export const scoringConfigSchema = z.object({
       insufficientMaxAbs: z.number().nonnegative(),
     })
     .optional(),
+  mintRisk: z
+    .object({
+      mintAuthorityActivePenalty: z.number().nonnegative(),
+      freezeAuthorityActivePenalty: z.number().nonnegative(),
+    })
+    .optional(),
+  rugcheck: z
+    .object({
+      minScore: z.number(),
+      maxTopHoldersPct: z.number(),
+      requireLpLocked: z.boolean(),
+      lowScorePenalty: z.number().nonnegative(),
+      unlockedLpPenalty: z.number().nonnegative(),
+      highConcentrationPenalty: z.number().nonnegative(),
+    })
+    .optional(),
+  birdeye: z
+    .object({
+      maxCreatorHoldingPct: z.number(),
+      minHolders: z.number().nonnegative(),
+      creatorHoldingPenalty: z.number().nonnegative(),
+      lowHolderPenalty: z.number().nonnegative(),
+    })
+    .optional(),
+  bondingCurve: z
+    .object({
+      sweetSpotMinPct: z.number(),
+      sweetSpotMaxPct: z.number(),
+      progressWeight: z.number().nonnegative(),
+      raiseWeight: z.number().nonnegative(),
+      fullRaiseSol: z.number().positive(),
+      maxVerdict: z.enum(["IGNORE", "WATCH", "INVESTIGATE", "HIGH ATTENTION"]),
+    })
+    .optional(),
   autoWatchMinScore: z.number(),
   recommendMinScore: z.number().default(65),
   followupHorizons: z.array(z.enum(["15m", "1h", "6h", "24h"])),
