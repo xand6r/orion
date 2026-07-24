@@ -8,7 +8,8 @@ RUN apt-get update \
   && rm -rf /var/lib/apt/lists/*
 
 COPY package.json package-lock.json ./
-RUN npm ci
+# No .git dir in this stage — skip husky's install step instead of logging noise about it.
+RUN HUSKY=0 npm ci
 
 FROM node:20-bookworm-slim AS runtime
 WORKDIR /app
